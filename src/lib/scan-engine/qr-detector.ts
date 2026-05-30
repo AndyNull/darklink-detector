@@ -1,11 +1,12 @@
 import jsQR from 'jsqr';
 import sharp from 'sharp';
 import type { QrCodeData } from './types';
+import { getNextUserAgent } from './browser-sim';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const IMAGE_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+/** Get a rotated User-Agent for image downloads */
+const getImageUA = (): string => getNextUserAgent();
 
 /** Max concurrent image downloads */
 const BATCH_SIZE = 18;
@@ -335,7 +336,7 @@ async function fetchImageBuffer(
     const timer = setTimeout(() => controller.abort(), timeout);
 
     const headers: Record<string, string> = {
-      'User-Agent': IMAGE_UA,
+      'User-Agent': getImageUA(),
       Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
       'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
       'Sec-Fetch-Dest': 'image',

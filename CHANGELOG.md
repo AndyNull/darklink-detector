@@ -4,6 +4,29 @@ All notable changes to DarkLink Detector will be documented in this file.
 
 ---
 
+## [v1.9.0] - 2026-05-31
+
+### Added
+
+- **浏览器指纹池** — 新增 `BrowserFingerprint` 类型，包含 UA、Accept-Language、视口尺寸、平台、引擎类型，12 种真实指纹轮换
+- **扫描线程指纹分配** — 每个 URL 扫描任务分配独立指纹（`getNextFingerprint()`），同一 URL 的所有请求（主请求/curl/外部资源/浏览器渲染）保持一致，模拟单一浏览器会话
+- **资源请求指纹传递** — 新增 `getResourceHeaders()` 函数，外部资源（JS/CSS）请求使用与主页面一致的指纹
+- **Playwright 指纹** — 浏览器渲染使用指纹中的 UA、视口和 Accept-Language
+
+### Changed
+
+- **UA 轮换机制** — 从 6 种 UA 扩展到 12 种指纹（含 Chrome/Firefox/Edge/Safari × Windows/macOS/Linux 组合），覆盖不同平台和屏幕分辨率
+- **fetchWithCurl** — 新增 `userAgent` 参数，不再硬编码单一 UA
+- **fetchExternalResource** — 新增 `fingerprint` 参数，不再硬编码请求头
+- **qr-detector** — 图片下载请求使用轮换 UA，不再硬编码
+- **sublinks/route.ts** — curl 和 fetch 请求均使用轮换 UA
+
+### Removed
+
+- **public/ 压缩包** — 项目打包不再放在 `public/` 目录，改用 GitHub Releases 分发
+
+---
+
 ## [v1.8.1] - 2026-05-30
 
 ### Fixed

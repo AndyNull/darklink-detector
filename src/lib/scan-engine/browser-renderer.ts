@@ -8,6 +8,7 @@
  */
 
 import { chromium, type Browser, type Page, type BrowserContext } from 'playwright';
+import type { BrowserFingerprint } from './browser-sim';
 
 // Singleton browser instance — reused across scans
 let _browser: Browser | null = null;
@@ -97,7 +98,8 @@ export interface BrowserRenderResult {
 export async function renderPageForImages(
   url: string,
   timeout: number = 20000,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  fingerprint?: BrowserFingerprint
 ): Promise<BrowserRenderResult> {
   const result: BrowserRenderResult = {
     imageUrls: [],
@@ -128,15 +130,15 @@ export async function renderPageForImages(
     activePages++;
     const browser = await getBrowser();
 
-    // Create a new context with realistic browser settings
+    // Create a new context with realistic browser settings (use fingerprint if provided)
     context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      viewport: { width: 1920, height: 1080 },
+      userAgent: fingerprint?.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      viewport: fingerprint?.viewport || { width: 1920, height: 1080 },
       locale: 'zh-CN',
       timezoneId: 'Asia/Shanghai',
       ignoreHTTPSErrors: true,
       extraHTTPHeaders: {
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Language': fingerprint?.acceptLanguage || 'zh-CN,zh;q=0.9,en;q=0.8',
       },
     });
 

@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import { URL } from 'url';
 import { lookup } from 'dns/promises';
 import { validateResolvedIP, validateScanUrl } from '@/lib/security';
+import { getNextUserAgent } from '@/lib/scan-engine/browser-sim';
 import { extractAllUrlsFromHtml } from '@/lib/scan-engine/html-parser';
 
 const execFileAsync = promisify(execFile);
@@ -177,7 +178,7 @@ async function fetchPageHtml(url: string, timeoutMs: number = 15000): Promise<st
     try {
       const { stdout } = await execFileAsync('curl', [
         '-s', '-L', '--max-time', String(Math.ceil(timeoutMs / 1000)), '--max-redirs', '5',
-        '-A', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        '-A', getNextUserAgent(),
         '-w', '\n%{http_code}',
         url,
       ], { timeout: timeoutMs + 5000, maxBuffer: 5 * 1024 * 1024 });
@@ -207,7 +208,7 @@ async function fetchPageHtml(url: string, timeoutMs: number = 15000): Promise<st
     try {
       const res = await fetch(url, {
         signal: AbortSignal.timeout(timeoutMs),
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' },
+        headers: { 'User-Agent': getNextUserAgent() },
         redirect: 'follow',
       });
 

@@ -1,51 +1,21 @@
 import { NextResponse } from 'next/server';
-import { existsSync, statSync } from 'fs';
-import { join } from 'path';
-import { ARCHIVE_NAME } from '@/lib/version';
+import { ARCHIVE_NAME, APP_VERSION } from '@/lib/version';
 
-// GET /api/download — returns archive info (JSON) or file stream
-// Archive is stored in the public/ directory for direct web access
-export async function GET(request: Request) {
-  // Check public/ folder first (preferred location), then download/ folder (legacy)
-  const publicPath = join(process.cwd(), 'public', ARCHIVE_NAME);
-  const downloadPath = join(process.cwd(), 'download', ARCHIVE_NAME);
+// GET /api/download — returns archive info pointing to GitHub Releases
+export const dynamic = 'force-dynamic';
 
-  let filePath: string | null = null;
-  if (existsSync(publicPath)) {
-    filePath = publicPath;
-  } else if (existsSync(downloadPath)) {
-    filePath = downloadPath;
-  }
+export async function GET() {
+  // Project archives are now distributed via GitHub Releases
+  const githubRepo = 'AndyNull/darklink-detector';
+  const releaseUrl = `https://github.com/${githubRepo}/releases/tag/${APP_VERSION}`;
+  const downloadUrl = `https://github.com/${githubRepo}/releases/download/${APP_VERSION}/${ARCHIVE_NAME}`;
 
-  if (!filePath) {
-    return NextResponse.json({ error: 'Archive not found' }, { status: 404 });
-  }
-
-  const url = new URL(request.url);
-  const action = url.searchParams.get('action');
-
-  // ?action=file — stream the archive file directly
-  if (action === 'file') {
-    const fileSize = statSync(filePath).size;
-    const fileBuffer = await import('fs').then(fs => fs.promises.readFile(filePath));
-
-    return new NextResponse(fileBuffer, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/gzip',
-        'Content-Disposition': `attachment; filename="${ARCHIVE_NAME}"`,
-        'Content-Length': String(fileSize),
-      },
-    });
-  }
-
-  // Default: return archive info as JSON
-  const fileSize = statSync(filePath).size;
   return NextResponse.json({
     name: ARCHIVE_NAME,
-    size: fileSize,
-    sizeMB: (fileSize / (1024 * 1024)).toFixed(1),
-    // Direct static file URL from public/ folder — no API overhead
-    downloadUrl: `/${ARCHIVE_NAME}`,
+    version: APP_VERSION,
+    sizeMB: null, // Size not available without local file; shown on GitHub Releases page
+    downloadUrl,
+    releaseUrl,
+    source: 'github_releases',
   });
 }

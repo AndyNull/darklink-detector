@@ -1,6 +1,6 @@
 import { parseHtml, extractImageUrls, extractExternalResources, extractUrlsFromJs, extractUrlsFromCssContent as extractUrlsFromCss, resolveUrl } from './html-parser';
 import { detectQrCodes, detectQrCodesFromUrls, detectQrCodesFromDataUri } from './qr-detector';
-import { getBrowserHeaders, fetchWithRedirectControl, MAX_REDIRECTS } from './browser-sim';
+import { getBrowserHeaders, getNextFingerprint, getResourceHeaders, fetchWithRedirectControl, MAX_REDIRECTS, type BrowserFingerprint } from './browser-sim';
 import type { ScanRequest, ScanResultData, UrlConfig, ScanProgress, LogEntry, TaskStatus, UrlDetailData, DarkLinkData, QrCodeData } from './types';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -86,7 +86,9 @@ async function fetchWithCurl(
   url: string,
   timeout: number,
   extraHeaders?: Record<string, string>,
+  userAgent?: string,
 ): Promise<{ html: string; statusCode: number; finalUrl: string }> {
+  const ua = userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
   const args: string[] = [
     '-s',               // Silent mode
     '-L',               // Follow redirects
@@ -95,7 +97,7 @@ async function fetchWithCurl(
     // NOTE: Only set User-Agent - some anti-bot systems (like chinatelecom.com.cn)
     // trigger on Accept/Accept-Language headers from non-browser TLS fingerprints.
     // curl with just a UA header has a better chance of getting the real page.
-    '-H', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    '-H', `User-Agent: ${ua}`,
   ];
 
   // Add extra headers
@@ -532,7 +534,8 @@ async function fetchExternalResource(
   url: string,
   timeout: number,
   abortSignal: AbortSignal,
-  referer?: string
+  referer?: string,
+  fingerprint?: BrowserFingerprint
 ): Promise<{ text: string; ok: boolean; status?: number } | null> {
   if (abortSignal.aborted) return null;
 
@@ -557,17 +560,19 @@ async function fetchExternalResource(
     const onParentAbort = () => controller.abort();
     abortSignal.addEventListener('abort', onParentAbort, { once: true });
 
-    const headers: Record<string, string> = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      'Accept': '*/*',
-      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Connection': 'keep-alive',
-      'Sec-Fetch-Dest': 'script',
-      'Sec-Fetch-Mode': 'no-cors',
-      'Sec-Fetch-Site': referer ? 'same-origin' : 'cross-site',
-      ...(referer ? { 'Referer': referer } : {}),
-    };
+    const headers: Record<string, string> = fingerprint
+      ? getResourceHeaders(fingerprint, referer)
+      : {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+          'Accept': '*/*',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Sec-Fetch-Dest': 'script',
+          'Sec-Fetch-Mode': 'no-cors',
+          'Sec-Fetch-Site': referer ? 'same-origin' : 'cross-site',
+          ...(referer ? { 'Referer': referer } : {}),
+        };
 
     const response = await fetch(url, {
       signal: controller.signal,
@@ -595,7 +600,8 @@ async function fetchExternalResources(
   timeout: number,
   abortSignal: AbortSignal,
   concurrency: number,
-  referer?: string
+  referer?: string,
+  fingerprint?: BrowserFingerprint
 ): Promise<Array<{ url: string; text: string }>> {
   const results: Array<{ url: string; text: string }> = [];
   const executing = new Set<Promise<void>>();
@@ -603,7 +609,7 @@ async function fetchExternalResources(
   for (const url of urls) {
     if (abortSignal.aborted) break;
 
-    const p = fetchExternalResource(url, timeout, abortSignal, referer).then((result) => {
+    const p = fetchExternalResource(url, timeout, abortSignal, referer, fingerprint).then((result) => {
       if (result && result.ok && result.text) {
         results.push({ url, text: result.text });
       }
@@ -839,6 +845,9 @@ export async function executeScan(
       };
     }
 
+    // Assign a consistent fingerprint for this URL scan
+    const fingerprint = getNextFingerprint();
+
     const startTime = Date.now();
     const result: ScanResultData = {
       url: urlConfig.url,
@@ -864,7 +873,7 @@ export async function executeScan(
       abortController.signal.addEventListener('abort', onTaskAbort);
 
       // Build headers with browser simulation
-      const browserHeaders = getBrowserHeaders(urlConfig.headers);
+      const browserHeaders = getBrowserHeaders(urlConfig.headers, fingerprint);
 
       const fetchOptions: RequestInit & { headers: Record<string, string> } = {
         method: urlConfig.method || 'GET',
@@ -921,7 +930,7 @@ export async function executeScan(
           if ((fallbackError as Error).name !== 'AbortError' && !abortController.signal.aborted) {
             emitLog('info', `简单请求也失败，尝试curl回退: ${urlConfig.url}`);
             try {
-              const curlResult = await fetchWithCurl(urlConfig.url, timeout, urlConfig.headers);
+              const curlResult = await fetchWithCurl(urlConfig.url, timeout, urlConfig.headers, fingerprint.userAgent);
               if (curlResult.html && curlResult.html.length > 0) {
                 // Create a synthetic response from curl result
                 result.statusCode = curlResult.statusCode;
@@ -973,7 +982,8 @@ export async function executeScan(
                         adaptive.externalTimeout,
                         abortController.signal,
                         EXTERNAL_FETCH_CONCURRENCY,
-                        baseUrl
+                        baseUrl,
+                        fingerprint
                       )
                     : Promise.resolve([]),
                   Promise.resolve(extractImageUrls(html, baseUrl)),
@@ -1108,7 +1118,7 @@ export async function executeScan(
       if (isAntiBotChallengePage(html)) {
         emitLog('info', `检测到反爬虫挑战页面(短页面含反爬标记)，快速回退curl: ${urlConfig.url}`, `HTML长度: ${html.length}`);
         try {
-          const curlResult = await fetchWithCurl(urlConfig.url, timeout, urlConfig.headers);
+          const curlResult = await fetchWithCurl(urlConfig.url, timeout, urlConfig.headers, fingerprint.userAgent);
           if (curlResult.html && curlResult.html.length > 1000 && !isRedirectPage(curlResult.html)) {
             html = curlResult.html;
             finalUrl = curlResult.finalUrl;
@@ -1138,7 +1148,7 @@ export async function executeScan(
       if (isFirstRedirect && PREFER_CURL_ON_FIRST_REDIRECT) {
         emitLog('info', `首次响应为重定向页面(可能为反爬虫)，直接使用curl获取: ${urlConfig.url}`);
         try {
-          const curlResult = await fetchWithCurl(urlConfig.url, timeout, urlConfig.headers);
+          const curlResult = await fetchWithCurl(urlConfig.url, timeout, urlConfig.headers, fingerprint.userAgent);
           if (curlResult.html && curlResult.html.length > 1000 && !isRedirectPage(curlResult.html)) {
             html = curlResult.html;
             finalUrl = curlResult.finalUrl;
@@ -1184,7 +1194,7 @@ export async function executeScan(
         }
 
         try {
-          const jsHeaders = getBrowserHeaders(urlConfig.headers);
+          const jsHeaders = getBrowserHeaders(urlConfig.headers, fingerprint);
           jsHeaders['Referer'] = finalUrl;
 
           // CRITICAL: Include accumulated cookies to break anti-bot redirect loops
@@ -1219,7 +1229,7 @@ export async function executeScan(
               const httpRedirectUrl = new URL(location, resolvedUrl).href;
               emitLog('info', `JS重定向目标返回HTTP重定向: ${resolvedUrl} -> ${httpRedirectUrl}`);
 
-              const httpRedirectHeaders = getBrowserHeaders(urlConfig.headers);
+              const httpRedirectHeaders = getBrowserHeaders(urlConfig.headers, fingerprint);
               httpRedirectHeaders['Referer'] = resolvedUrl;
               if (accumulatedCookies.length > 0) {
                 httpRedirectHeaders['Cookie'] = buildCookieHeader(accumulatedCookies);
@@ -1273,7 +1283,7 @@ export async function executeScan(
         // FALLBACK: Use curl to fetch the page
         // curl has a browser-like TLS fingerprint which bypasses JA3/JA4-based anti-bot
         try {
-          const curlResult = await fetchWithCurl(urlConfig.url, timeout, urlConfig.headers);
+          const curlResult = await fetchWithCurl(urlConfig.url, timeout, urlConfig.headers, fingerprint.userAgent);
           if (curlResult.html && curlResult.html.length > 1000 && !isRedirectPage(curlResult.html)) {
             html = curlResult.html;
             finalUrl = curlResult.finalUrl;
@@ -1330,7 +1340,8 @@ export async function executeScan(
               adaptive.externalTimeout,
               abortController.signal,
               EXTERNAL_FETCH_CONCURRENCY,
-              baseUrl
+              baseUrl,
+              fingerprint
             )
           : Promise.resolve([] as Array<{ url: string; text: string }>),
         Promise.resolve(extractImageUrls(html, baseUrl)),
