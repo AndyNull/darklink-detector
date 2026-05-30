@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef, Suspense } from 'react';
-import { useScanStore } from '@/lib/scan-store';
+import { useScanStore, type ScanResultItem } from '@/lib/scan-store';
 import { isSafeDomain } from '@/lib/safe-domain-whitelist';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -69,6 +69,7 @@ export function ResultsPanel() {
     darkLinkDetails: any[];
     title?: string;
   } | null>(null);
+  const [htmlLoading, setHtmlLoading] = useState(false);
 
   // ──── Malicious library batch check ────
   const [maliciousMatches, setMaliciousMatches] = useState<Set<string>>(new Set());
@@ -322,6 +323,31 @@ export function ResultsPanel() {
     return sorted;
   }, [darkLinks, darkLinkSort, maliciousMatches, threatIntelConfirmed]);
 
+  const handlePreview = useCallback(async (result: ScanResultItem) => {
+    // Immediately show the dialog with available data
+    setPreviewResult(result);
+    // If rawHtml is missing, lazy-load it from the API
+    if (!result.rawHtml) {
+      setHtmlLoading(true);
+      try {
+        const taskId = useScanStore.getState().taskId;
+        const res = await fetch(`/api/scan/html?taskId=${encodeURIComponent(taskId || '')}&url=${encodeURIComponent(result.url)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.rawHtml) {
+            setPreviewResult(prev => prev ? { ...prev, rawHtml: data.rawHtml } : prev);
+            // Also update the store so subsequent previews don't need to re-fetch
+            useScanStore.getState().updateResultRawHtml(result.url, data.rawHtml);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load HTML:', err);
+      } finally {
+        setHtmlLoading(false);
+      }
+    }
+  }, []);
+
   const handleCopyUrl = useCallback(async (url: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     try {
@@ -430,7 +456,7 @@ export function ResultsPanel() {
               filteredResults={filteredResults}
               copiedUrl={copiedUrl}
               onCopy={handleCopyUrl}
-              onPreview={setPreviewResult}
+              onPreview={handlePreview}
             />
           </Suspense>
         </TabsContent>
@@ -483,6 +509,7 @@ export function ResultsPanel() {
           rawHtml={previewResult?.rawHtml}
           darkLinkDetails={previewResult?.darkLinkDetails || []}
           title={previewResult?.title}
+          htmlLoading={htmlLoading}
         />
       </Suspense>
     </div>

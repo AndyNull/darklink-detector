@@ -5,6 +5,7 @@ import path from 'path';
 
 const PORT = parseInt(process.env.DATA_SYNC_PORT || '3004', 10);
 // 支持环境变量覆盖数据库路径（Docker 部署时使用）
+const __dirname = import.meta.dirname;
 const DB_PATH = process.env.DB_PATH || path.resolve(__dirname, '../../db/custom.db');
 const POLL_INTERVAL = 30_000; // 30 seconds
 const SYNC_TASKS_FAST_POLL = 5_000; // 5 seconds for active sync tasks
@@ -218,33 +219,55 @@ function queryMaliciousEntries(
     const offset = (page - 1) * pageSize;
 
     if (type === 'ip') {
-      let whereClause = '1=1';
+      let countRow: { count: number } | null;
+      let items: any[];
+
       if (search) {
-        whereClause = `ip LIKE '%${search.replace(/'/g, "''")}%' OR reason LIKE '%${search.replace(/'/g, "''")}%' OR category LIKE '%${search.replace(/'/g, "''")}%'`;
+        const searchPattern = `%${search}%`;
+        countRow = d.query(
+          'SELECT COUNT(*) as count FROM MaliciousIP WHERE ip LIKE ? OR reason LIKE ? OR category LIKE ?',
+          [searchPattern, searchPattern, searchPattern]
+        ).get() as { count: number } | null;
+        items = d.query(
+          'SELECT id, ip, reason, source, severity, category, country, createdAt, updatedAt FROM MaliciousIP WHERE ip LIKE ? OR reason LIKE ? OR category LIKE ? ORDER BY createdAt DESC LIMIT ? OFFSET ?',
+          [searchPattern, searchPattern, searchPattern, pageSize, offset]
+        ).all() as any[];
+      } else {
+        countRow = d.query('SELECT COUNT(*) as count FROM MaliciousIP WHERE 1=1').get() as { count: number } | null;
+        items = d.query(
+          'SELECT id, ip, reason, source, severity, category, country, createdAt, updatedAt FROM MaliciousIP WHERE 1=1 ORDER BY createdAt DESC LIMIT ? OFFSET ?',
+          [pageSize, offset]
+        ).all() as any[];
       }
 
-      const countRow = d.query(`SELECT COUNT(*) as count FROM MaliciousIP WHERE ${whereClause}`).get() as { count: number };
       const total = countRow?.count || 0;
-
-      const items = d.query(
-        `SELECT id, ip, reason, source, severity, category, country, createdAt, updatedAt FROM MaliciousIP WHERE ${whereClause} ORDER BY createdAt DESC LIMIT ${pageSize} OFFSET ${offset}`
-      ).all() as any[];
 
       const result = { items, total, page, pageSize };
       cachedMaliciousEntries.set(cacheKey, { data: result, timestamp: Date.now() });
       return result;
     } else {
-      let whereClause = '1=1';
+      let countRow: { count: number } | null;
+      let items: any[];
+
       if (search) {
-        whereClause = `domain LIKE '%${search.replace(/'/g, "''")}%' OR reason LIKE '%${search.replace(/'/g, "''")}%' OR category LIKE '%${search.replace(/'/g, "''")}%'`;
+        const searchPattern = `%${search}%`;
+        countRow = d.query(
+          'SELECT COUNT(*) as count FROM MaliciousDomain WHERE domain LIKE ? OR reason LIKE ? OR category LIKE ?',
+          [searchPattern, searchPattern, searchPattern]
+        ).get() as { count: number } | null;
+        items = d.query(
+          'SELECT id, domain, reason, source, severity, category, createdAt, updatedAt FROM MaliciousDomain WHERE domain LIKE ? OR reason LIKE ? OR category LIKE ? ORDER BY createdAt DESC LIMIT ? OFFSET ?',
+          [searchPattern, searchPattern, searchPattern, pageSize, offset]
+        ).all() as any[];
+      } else {
+        countRow = d.query('SELECT COUNT(*) as count FROM MaliciousDomain WHERE 1=1').get() as { count: number } | null;
+        items = d.query(
+          'SELECT id, domain, reason, source, severity, category, createdAt, updatedAt FROM MaliciousDomain WHERE 1=1 ORDER BY createdAt DESC LIMIT ? OFFSET ?',
+          [pageSize, offset]
+        ).all() as any[];
       }
 
-      const countRow = d.query(`SELECT COUNT(*) as count FROM MaliciousDomain WHERE ${whereClause}`).get() as { count: number };
       const total = countRow?.count || 0;
-
-      const items = d.query(
-        `SELECT id, domain, reason, source, severity, category, createdAt, updatedAt FROM MaliciousDomain WHERE ${whereClause} ORDER BY createdAt DESC LIMIT ${pageSize} OFFSET ${offset}`
-      ).all() as any[];
 
       const result = { items, total, page, pageSize };
       cachedMaliciousEntries.set(cacheKey, { data: result, timestamp: Date.now() });

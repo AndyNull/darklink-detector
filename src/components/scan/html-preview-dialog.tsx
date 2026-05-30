@@ -21,6 +21,7 @@ import {
   Check,
   FileText,
   Zap,
+  Loader2,
 } from 'lucide-react';
 
 interface DarkLinkHighlight {
@@ -39,6 +40,8 @@ interface HtmlPreviewDialogProps {
   rawHtml?: string;
   darkLinkDetails?: DarkLinkHighlight[];
   title?: string;
+  /** Whether rawHtml is being lazy-loaded from the API */
+  htmlLoading?: boolean;
 }
 
 function escapeHtml(text: string): string {
@@ -110,6 +113,7 @@ export function HtmlPreviewDialog({
   rawHtml,
   darkLinkDetails = [],
   title,
+  htmlLoading = false,
 }: HtmlPreviewDialogProps) {
   const [copiedHtml, setCopiedHtml] = useState(false);
 
@@ -231,7 +235,12 @@ export function HtmlPreviewDialog({
 
           <TabsContent value="highlighted" className="flex-1 min-h-0 mt-0 px-2 pb-2">
             <ScrollArea className="h-full max-h-[50vh]">
-              {rawHtml ? (
+              {htmlLoading && !rawHtml ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  <span className="ml-2 text-muted-foreground text-xs">加载HTML内容...</span>
+                </div>
+              ) : rawHtml ? (
                 <pre className="text-[10px] leading-relaxed font-mono p-3 bg-muted/30 rounded-md whitespace-pre-wrap break-all">
                   <code dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
                 </pre>
@@ -245,7 +254,12 @@ export function HtmlPreviewDialog({
 
           <TabsContent value="raw" className="flex-1 min-h-0 mt-0 px-2 pb-2">
             <ScrollArea className="h-full max-h-[50vh]">
-              {rawHtml ? (
+              {htmlLoading && !rawHtml ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  <span className="ml-2 text-muted-foreground text-xs">加载HTML内容...</span>
+                </div>
+              ) : rawHtml ? (
                 <pre className="text-[10px] leading-relaxed font-mono p-3 bg-muted/30 rounded-md whitespace-pre-wrap break-all">
                   {rawHtml}
                 </pre>

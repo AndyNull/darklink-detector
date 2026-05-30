@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { requireSessionAuth } from '@/lib/api-auth';
 import { rsaDecrypt, DatabaseConfig } from '@/lib/server-config';
+import { validateResolvedIP } from '@/lib/security';
 
 /**
  * Test TCP connectivity to a given host:port within a timeout.
@@ -169,6 +170,25 @@ async function testMysql(config: DatabaseConfig): Promise<NextResponse> {
     });
   }
 
+  // Private IP filter: prevent connections to internal network addresses
+  try {
+    const { lookup } = await import('dns');
+    const resolvedIp = await new Promise<string>((resolve, reject) => {
+      lookup(host, (err, address) => {
+        if (err) reject(err);
+        else resolve(address);
+      });
+    });
+    if (!validateResolvedIP(resolvedIp)) {
+      return NextResponse.json({
+        error: '不允许连接到内网地址',
+        success: false,
+      }, { status: 400 });
+    }
+  } catch (dnsErr: any) {
+    // DNS lookup failed - let it proceed and the connection will fail naturally
+  }
+
   // Decrypt password if RSA-encrypted
   const password = tryDecryptPassword(encryptedPassword);
 
@@ -214,6 +234,25 @@ async function testPostgresql(config: DatabaseConfig): Promise<NextResponse> {
       success: false,
       message: 'PostgreSQL 配置不完整，请填写所有必填字段',
     });
+  }
+
+  // Private IP filter: prevent connections to internal network addresses
+  try {
+    const { lookup } = await import('dns');
+    const resolvedIp = await new Promise<string>((resolve, reject) => {
+      lookup(host, (err, address) => {
+        if (err) reject(err);
+        else resolve(address);
+      });
+    });
+    if (!validateResolvedIP(resolvedIp)) {
+      return NextResponse.json({
+        error: '不允许连接到内网地址',
+        success: false,
+      }, { status: 400 });
+    }
+  } catch (dnsErr: any) {
+    // DNS lookup failed - let it proceed and the connection will fail naturally
   }
 
   // Decrypt password if RSA-encrypted

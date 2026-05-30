@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { stopTask, isTaskRunning } from '@/lib/scan-engine/scan-engine';
 import { auditLog } from '@/lib/audit-logger';
+import { requireSessionAuth } from '@/lib/api-auth';
+import { safeErrorResponse } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
+  const authError = requireSessionAuth(request);
+  if (authError) return authError;
+
   try {
     const body = await request.json();
     const { taskId } = body;
@@ -24,6 +29,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ taskId, stopped });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 400 });
+    return safeErrorResponse(err, '停止扫描失败');
   }
 }

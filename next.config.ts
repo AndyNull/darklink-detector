@@ -2,9 +2,6 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  typescript: {
-    ignoreBuildErrors: true,
-  },
   reactStrictMode: false,
   // 不自动重定向去掉尾斜杠，避免干扰代理路径
   skipTrailingSlashRedirect: true,

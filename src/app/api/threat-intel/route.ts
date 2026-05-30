@@ -224,10 +224,16 @@ async function queryThreatBookIP(ip: string): Promise<{
   try {
     await waitForRateLimit();
 
-    const url = `${THREATBOOK_BASE_URL}/asset/ip?apikey=${THREATBOOK_API_KEY}&ip=${encodeURIComponent(ip)}`;
+    const url = `${THREATBOOK_BASE_URL}/asset/ip?ip=${encodeURIComponent(ip)}`;
     const response = await fetch(url, {
       method: 'GET',
-      headers: { 'Accept': 'application/json' },
+      headers: {
+        'Accept': 'application/json',
+        // NOTE: ThreatBook API requires the key in the query string; it does not support
+        // header-based auth. We pass the key via X-API-Key header as a best-effort
+        // measure, but the query parameter must remain for API compatibility.
+        'X-API-Key': THREATBOOK_API_KEY,
+      },
       signal: AbortSignal.timeout(15000),
     });
 
@@ -313,10 +319,16 @@ async function queryThreatBookDomain(domain: string): Promise<{
   try {
     await waitForRateLimit();
 
-    const url = `${THREATBOOK_BASE_URL}/asset/domain?apikey=${THREATBOOK_API_KEY}&domain=${encodeURIComponent(domain)}`;
+    const url = `${THREATBOOK_BASE_URL}/asset/domain?domain=${encodeURIComponent(domain)}`;
     const response = await fetch(url, {
       method: 'GET',
-      headers: { 'Accept': 'application/json' },
+      headers: {
+        'Accept': 'application/json',
+        // NOTE: ThreatBook API requires the key in the query string; it does not support
+        // header-based auth. We pass the key via X-API-Key header as a best-effort
+        // measure, but the query parameter must remain for API compatibility.
+        'X-API-Key': THREATBOOK_API_KEY,
+      },
       signal: AbortSignal.timeout(15000),
     });
 

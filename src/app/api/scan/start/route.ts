@@ -6,6 +6,7 @@ import type { ScanRequest, ScanProgress, ScanResultData, LogEntry } from '@/lib/
 import { validateScanUrls } from '@/lib/security';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { auditLog } from '@/lib/audit-logger';
+import { safeErrorResponse } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -90,6 +91,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ taskId, status: 'started' }, { status: 202 });
   } catch (err) {
     console.error('[SCAN] Start error:', err);
-    return NextResponse.json({ error: (err as Error).message }, { status: 400 });
+    return safeErrorResponse(err, '扫描启动失败');
   }
 }

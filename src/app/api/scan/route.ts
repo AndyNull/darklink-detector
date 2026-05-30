@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSessionAuth } from '@/lib/api-auth';
 import { checkRateLimit } from '@/lib/rate-limit';
+import { validateScanUrls } from '@/lib/security';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -171,6 +172,18 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Missing taskId or request' }, { status: 400 });
         }
 
+        // SSRF validation: validate all scan URLs before proceeding
+        const { valid, invalid } = validateScanUrls(scanRequest.urls);
+        if (invalid.length > 0) {
+          return NextResponse.json(
+            { error: 'Invalid URLs detected', invalidUrls: invalid },
+            { status: 400 },
+          );
+        }
+
+        // Use only validated URLs
+        scanRequest.urls = valid;
+
         // Cleanup old tasks
         cleanupOldTasks(store);
 
@@ -188,15 +201,11 @@ export async function POST(request: NextRequest) {
         };
 
         const onResult = (result: any) => {
-          const existing = store.taskResults.get(taskId) || [];
-          existing.push(result);
-          store.taskResults.set(taskId, existing);
+          store.taskResults.set(taskId, [...(store.taskResults.get(taskId) || []), result]);
         };
 
         const onLog = (log: any) => {
-          const existing = store.taskLogs.get(taskId) || [];
-          existing.push(log);
-          store.taskLogs.set(taskId, existing);
+          store.taskLogs.set(taskId, [...(store.taskLogs.get(taskId) || []), log]);
         };
 
         // Run scan in a separate microtask to decouple from request lifecycle

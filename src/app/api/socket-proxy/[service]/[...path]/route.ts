@@ -9,6 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSessionAuth } from '@/lib/api-auth';
 
 // 服务端口映射
 const SERVICE_PORTS: Record<string, number> = {
@@ -106,10 +107,14 @@ async function proxyRequest(req: NextRequest, method: string) {
 }
 
 export async function GET(req: NextRequest) {
+  const authError = requireSessionAuth(req);
+  if (authError) return authError;
   return proxyRequest(req, 'GET');
 }
 
 export async function POST(req: NextRequest) {
+  const authError = requireSessionAuth(req);
+  if (authError) return authError;
   return proxyRequest(req, 'POST');
 }
 

@@ -89,14 +89,15 @@ model DarkLink {
 }
 
 model QrCodeResult {
-  id           String     @id @default(cuid())
-  resultId     String
-  sourceUrl    String?    @db.Text
-  decodedText  String     @db.Text
-  isSuspicious Boolean    @default(false)
-  reason       String?    @db.VarChar(500)
-  createdAt    DateTime   @default(now())
-  result       ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  id            String     @id @default(cuid())
+  resultId      String
+  sourceUrl     String?    @db.Text
+  decodedText   String     @db.Text
+  isSuspicious  Boolean    @default(false)
+  reason        String?    @db.VarChar(500)
+  qrImageBase64 String?    @db.MediumText
+  createdAt     DateTime   @default(now())
+  result        ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
 
   @@index([resultId])
 }
@@ -112,4 +113,102 @@ model ScanLog {
 
   @@index([taskId])
   @@index([level])
+}
+
+model MaliciousDomain {
+  id          String   @id @default(cuid())
+  domain      String   @unique @db.VarChar(255)
+  reason      String?  @db.Text
+  source      String   @default("manual") @db.VarChar(20)
+  severity    String   @default("high") @db.VarChar(20)
+  category    String?  @db.VarChar(50)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model MaliciousIP {
+  id          String   @id @default(cuid())
+  ip          String   @unique @db.VarChar(45)
+  reason      String?  @db.Text
+  source      String   @default("manual") @db.VarChar(20)
+  severity    String   @default("high") @db.VarChar(20)
+  category    String?  @db.VarChar(50)
+  country     String?  @db.VarChar(100)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model UpdateSchedule {
+  id          String    @id @default(cuid())
+  enabled     Boolean   @default(false)
+  frequency   String    @default("daily") @db.VarChar(20)
+  lastRunAt   DateTime?
+  nextRunAt   DateTime?
+  status      String    @default("idle") @db.VarChar(20)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model ThreatIntelSource {
+  id            String    @id @default(cuid())
+  sourceId      String    @unique @db.VarChar(50)
+  name          String    @db.VarChar(200)
+  nameEn        String?   @db.VarChar(200)
+  description   String?   @db.Text
+  enabled       Boolean   @default(true)
+  requiresApiKey Boolean  @default(false)
+  apiKey        String?   @db.VarChar(500)
+  status        String    @default("idle") @db.VarChar(20)
+  lastUpdate    DateTime?
+  entryCount    Int       @default(0)
+  error         String?   @db.Text
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  entries       ThreatIntelEntry[]
+}
+
+model ThreatIntelEntry {
+  id        String   @id @default(cuid())
+  sourceId  String   @db.VarChar(50)
+  type      String   @db.VarChar(20)
+  value     String   @db.VarChar(255)
+  severity  String   @default("medium") @db.VarChar(20)
+  tags      String?  @db.Text
+  createdAt DateTime @default(now())
+  source    ThreatIntelSource @relation(fields: [sourceId], references: [sourceId], onDelete: Cascade)
+
+  @@index([type, value])
+  @@index([sourceId])
+  @@index([value])
+  @@unique([sourceId, type, value])
+}
+
+model ThreatIntelApiKey {
+  id            String    @id @default(cuid())
+  source        String    @unique @db.VarChar(50)
+  apiKey        String    @db.VarChar(500)
+  apiUrl        String?   @db.VarChar(500)
+  enabled       Boolean   @default(true)
+  lastValidated DateTime?
+  lastError     String?   @db.Text
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model SyncTask {
+  id               String    @id @default(cuid())
+  name             String    @db.VarChar(200)
+  sources          String    @db.Text
+  status           String    @default("pending") @db.VarChar(20)
+  progress         Float     @default(0)
+  totalSources     Int       @default(0)
+  completedSources Int       @default(0)
+  failedSources    Int       @default(0)
+  results          String?   @db.MediumText
+  message          String?   @db.VarChar(500)
+  error            String?   @db.Text
+  createdAt        DateTime  @default(now())
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdBy        String?   @db.VarChar(100)
 }

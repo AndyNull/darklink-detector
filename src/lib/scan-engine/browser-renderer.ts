@@ -17,8 +17,32 @@ let _browserLaunchPromise: Promise<Browser> | null = null;
 // Maximum concurrent browser pages
 const MAX_CONCURRENT_PAGES = 3;
 
-// Active page count for concurrency control
-let activePages = 0;
+// Semaphore for proper concurrency control (replaces simple counter)
+class Semaphore {
+  private queue: (() => void)[] = [];
+  private _count: number;
+  constructor(private max: number) { this._count = max; }
+  get count() { return this._count; }
+  async acquire(): Promise<void> {
+    if (this._count > 0) {
+      this._count--;
+      return;
+    }
+    return new Promise<void>((resolve) => {
+      this.queue.push(resolve);
+    });
+  }
+  release(): void {
+    const next = this.queue.shift();
+    if (next) {
+      next();
+    } else {
+      this._count++;
+    }
+  }
+}
+
+const pageSemaphore = new Semaphore(MAX_CONCURRENT_PAGES);
 
 async function getBrowser(): Promise<Browser> {
   if (_browser && _browser.isConnected()) {
@@ -117,17 +141,12 @@ export async function renderPageForImages(
     return result;
   }
 
-  // Concurrency control
-  if (activePages >= MAX_CONCURRENT_PAGES) {
-    result.error = 'Too many concurrent browser pages';
-    return result;
-  }
-
   let context: BrowserContext | null = null;
   let page: Page | null = null;
 
   try {
-    activePages++;
+    // Acquire semaphore slot (waits if at capacity)
+    await pageSemaphore.acquire();
     const browser = await getBrowser();
 
     // Create a new context with realistic browser settings (use fingerprint if provided)
@@ -350,7 +369,7 @@ export async function renderPageForImages(
     try {
       if (context) await context.close();
     } catch {}
-    activePages = Math.max(0, activePages - 1);
+    pageSemaphore.release();
   }
 
   return result;

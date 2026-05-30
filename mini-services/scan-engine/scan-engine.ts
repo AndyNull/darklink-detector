@@ -460,25 +460,47 @@ function extractDedupKey(url: string, domain?: string): string {
 }
 
 // Trusted CDN/Service domains - skip suspicious_domain detection for these
+// Synced from src/lib/scan-engine/shared-constants.ts
 const TRUSTED_DOMAINS_ENGINE = new Set([
+  // Common CDNs
   'cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com',
   'ajax.googleapis.com', 'cdnjs.cloudflare.com', 'cdn.bootcdn.net',
   'cdn.staticfile.org', 'unpkg.com', 'stackpath.bootstrapcdn.com',
   'code.jquery.com', 'maxcdn.bootstrapcdn.com',
+  // Chinese CDNs
   'lib.baomitu.com', 'cdn.bytedance.com',
+  'lf3-cdn-tos.bytecdntp.com', 'lf6-cdn-tos.bytecdntp.com',
+  'lf9-cdn-tos.bytecdntp.com',
+  // Analytics & Tag Managers
   'www.googletagmanager.com', 'www.google-analytics.com',
   'connect.facebook.net', 'analytics.tiktok.com',
   'hm.baidu.com', 'zz.bdstatic.com', 's19.cnzz.com', 'cnzz.com',
   'tongji.baidu.com', 'api.mapbox.com', 'cdn.ampproject.org',
-  'analytics.google.com', 'static.hotjar.com',
-  'sentry.io', 'browser.sentry-cdn.com',
+  'plausible.io', 'matomo.org',
+  'analytics.google.com', 'region1.google-analytics.com',
+  'tagmanager.google.com', 'static.hotjar.com',
+  'cdn.mxpnl.com', 'sentry.io', 'browser.sentry-cdn.com',
+  // Social / Sharing
   'platform.twitter.com', 'apis.google.com',
+  'static.addtoany.com', 'assets.pinterest.com',
+  'sdn.geetest.com', 'api-share.facebook.com', 'www.facebook.com',
+  'graph.facebook.com', 'syndication.twitter.com',
+  // Common legit services on cheap TLDs
   'github.io', 'netlify.app', 'vercel.app', 'herokuapp.com',
   'pages.dev', 'surge.sh', 'gitlab.io', 'readthedocs.io',
   'cloudfront.net', 'amazonaws.com', 'azureedge.net',
-  'onrender.com', 'railway.app', 'fly.dev', 'deno.dev',
-  'supabase.co', 'hasura.app', 'firebaseapp.com',
-  'payments.stripe.com', 'js.stripe.com', 'cdn.shopify.com',
+  // Cloud services
+  'azurewebsites.net', 'cloudapp.net', 'compute.amazonaws.com',
+  'elasticbeanstalk.com', 'firebaseapp.com', 'firebaseio.com',
+  'onrender.com', 'railway.app', 'fly.dev',
+  'deno.dev', 'supabase.co', 'hasura.app',
+  // Common services
+  'cdn.sstatic.net', 'i.stack.imgur.com',
+  'payments.stripe.com', 'js.stripe.com',
+  'checkout.stripe.com', 'api.stripe.com',
+  'js.braintreegateway.com', 'assets.braintreegateway.com',
+  'www.paypal.com', 'api.paypal.com',
+  'cdn.shopify.com', 'monorail-edge.shopifysvc.com',
 ]);
 
 // Helper: check if a domain is suspicious relative to the base domain
@@ -506,24 +528,109 @@ function isSuspiciousDomain(domain: string, baseDomain: string): boolean {
 }
 
 // Validate that a resolved IP address is not private/reserved (DNS rebinding protection)
+// Supports both IPv4 and IPv6 private ranges
 function validateResolvedIP(ip: string): boolean {
-  // Block private/reserved IPs
-  const parts = ip.split('.').map(Number);
-  if (parts.length !== 4) return false;
-  const [a, b, c, d] = parts;
-  // 10.0.0.0/8
-  if (a === 10) return false;
-  // 172.16.0.0/12
-  if (a === 172 && b >= 16 && b <= 31) return false;
-  // 192.168.0.0/16
-  if (a === 192 && b === 168) return false;
-  // 127.0.0.0/8
-  if (a === 127) return false;
-  // 0.0.0.0
-  if (a === 0 && b === 0 && c === 0 && d === 0) return false;
-  // 169.254.0.0/16
-  if (a === 169 && b === 254) return false;
+  // ── IPv6 handling ──
+  if (ip.includes(':')) {
+    // Check IPv6 private ranges first
+    if (isPrivateIPv6(ip)) return false;
+
+    // Handle IPv4-mapped IPv6 (e.g. ::ffff:192.168.1.1)
+    const v4MappedMatch = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+    if (v4MappedMatch) {
+      return !isPrivateIP(v4MappedMatch[1]);
+    }
+
+    return true;
+  }
+
+  // ── IPv4 handling ──
+  if (isPrivateIP(ip)) return false;
+
+  // If the format is unrecognized, reject conservatively
   return true;
+}
+
+// Private IP ranges to block for SSRF protection
+const PRIVATE_IP_RANGES = [
+  { start: 10 * 256 ** 3, end: 10 * 256 ** 3 + 255 * 256 ** 2 + 255 * 256 + 255 },  // 10.0.0.0/8
+  { start: 172 * 256 ** 3 + 16 * 256 ** 2, end: 172 * 256 ** 3 + 31 * 256 ** 2 + 255 * 256 + 255 }, // 172.16.0.0/12
+  { start: 192 * 256 ** 3 + 168 * 256 ** 2, end: 192 * 256 ** 3 + 168 * 256 ** 2 + 255 * 256 + 255 }, // 192.168.0.0/16
+  { start: 127 * 256 ** 3, end: 127 * 256 ** 3 + 255 * 256 ** 2 + 255 * 256 + 255 }, // 127.0.0.0/8
+  { start: 169 * 256 ** 3 + 254 * 256 ** 2, end: 169 * 256 ** 3 + 254 * 256 ** 2 + 255 * 256 + 255 }, // 169.254.0.0/16
+  { start: 0, end: 255 * 256 ** 2 + 255 * 256 + 255 }, // 0.0.0.0/8
+];
+
+function ipToNumber(ip: string): number {
+  const parts = ip.split('.').map(Number);
+  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+}
+
+function isPrivateIP(ip: string): boolean {
+  const num = ipToNumber(ip);
+  return PRIVATE_IP_RANGES.some(range => num >= range.start && num <= range.end);
+}
+
+/**
+ * Check whether an IPv6 address falls into a private/reserved range.
+ * Handles shortened forms like "::1" by expanding to full 8-group notation.
+ */
+function isPrivateIPv6(ip: string): boolean {
+  const groups = expandIPv6(ip);
+
+  // ::1 — loopback
+  if (groups[0] === 0 && groups[1] === 0 && groups[2] === 0 && groups[3] === 0 &&
+      groups[4] === 0 && groups[5] === 0 && groups[6] === 0 && groups[7] === 1) {
+    return true;
+  }
+
+  // fc00::/7 — unique-local (first 7 bits = 1111110 → first byte 0xfc or 0xfd)
+  if ((groups[0] & 0xfe00) === 0xfc00) {
+    return true;
+  }
+
+  // fe80::/10 — link-local (first 10 bits = 1111111010 → first byte 0xfe, second byte & 0xc0 == 0x00)
+  if (groups[0] === 0xfe80 && (groups[1] & 0xc000) === 0x0000) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Expand an IPv6 address string into 8 numeric 16-bit groups.
+ * Handles shorthand like "::1" → [0,0,0,0,0,0,0,1].
+ */
+function expandIPv6(ip: string): number[] {
+  // Handle IPv4-mapped IPv6 like ::ffff:192.168.1.1
+  const v4MappedMatch = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+  if (v4MappedMatch) {
+    const v4Part = v4MappedMatch[1];
+    const octets = v4Part.split('.').map(Number);
+    return [0, 0, 0, 0, 0, 0xffff, (octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]];
+  }
+
+  const halves = ip.split('::');
+  const result: number[] = new Array(8).fill(0);
+
+  if (halves.length === 1) {
+    const parts = ip.split(':').map(p => (p ? parseInt(p, 16) : 0));
+    for (let i = 0; i < Math.min(parts.length, 8); i++) {
+      result[i] = parts[i];
+    }
+  } else {
+    const left = halves[0] ? halves[0].split(':').map(p => parseInt(p, 16)) : [];
+    const right = halves[1] ? halves[1].split(':').map(p => parseInt(p, 16)) : [];
+    for (let i = 0; i < left.length; i++) {
+      result[i] = left[i];
+    }
+    const rightStart = 8 - right.length;
+    for (let i = 0; i < right.length; i++) {
+      result[rightStart + i] = right[i];
+    }
+  }
+
+  return result;
 }
 
 // Fetch a single external resource with timeout and error handling

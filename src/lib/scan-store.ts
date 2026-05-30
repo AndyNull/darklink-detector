@@ -199,6 +199,7 @@ interface ScanStore {
   setIsScanning: (val: boolean) => void;
   resetScan: () => void;
   loadTaskResults: (taskId: string) => void;
+  updateResultRawHtml: (url: string, rawHtml: string) => void;
 
   // Computed
   getFilteredResults: () => ScanResultItem[];
@@ -443,6 +444,12 @@ export const useScanStore = create<ScanStore>((set, get) => ({
     } catch (err) {
       console.error('Failed to load task results:', err);
     }
+  },
+
+  updateResultRawHtml: (url: string, rawHtml: string) => {
+    set(state => ({
+      results: state.results.map(r => r.url === url ? { ...r, rawHtml } : r),
+    }));
   },
 
   setSeverityFilter: (f) => set({ severityFilter: f }),

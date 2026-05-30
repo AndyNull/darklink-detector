@@ -4,6 +4,50 @@ All notable changes to DarkLink Detector will be documented in this file.
 
 ---
 
+## [v1.10.0] - 2026-05-31
+
+### Security
+
+- **SSRF 修复** — 为所有 `fetchWithCurl` 调用点添加 DNS Rebinding 检查，堵住 curl 回退路径的 SSRF 漏洞
+- **SQL 注入修复** — data-sync-service 的搜索参数改用参数化查询
+- **认证补全** — socket-proxy 和 scan/stop 路由添加 `requireSessionAuth` 认证
+- **SSRF 校验统一** — 统一扫描端点 POST start 添加 `validateScanUrls()` 校验
+- **数据库连接测试** — 添加私有 IP 过滤，禁止连接内网地址
+- **API Key 保护** — ThreatBook API Key 从 URL 查询参数迁移到请求头
+- **错误信息脱敏** — 新增 `safeErrorResponse()` 工具函数，生产环境隐藏内部错误详情
+
+### Fixed
+
+- **页面源码预览** — 修复扫描结果 HTML 预览始终显示"无HTML内容"的 bug，新增 `/api/scan/html` 按需加载端点
+- **扫描报告对话框** — 修复 `getScanDuration`/`maliciousMatches` 不存在的引用导致崩溃
+- **浏览器渲染竞态** — `activePages` 计数器改用 Semaphore 信号量，消除并发竞态
+- **扫描结果竞态** — `onResult`/`onLog` 回调改用不可变追加，消除数据丢失风险
+- **`isZeroSize` 语义** — 拆分为 `isZeroSize`(仅0) + `isOnePixelSize`(仅1)，消除命名误导
+
+### Added
+
+- **共享常量模块** — 新增 `shared-constants.ts`，统一 TRUSTED_DOMAINS/URL_SHORTENERS/extractDomain/isValidDomain/isSuspiciousDomain
+- **SQLite 索引** — 补全 ScanTask/ScanResult/UrlDetail/DarkLink/QrCodeResult/ScanLog 的所有 `@@index`
+- **MySQL/PostgreSQL 模型** — 补全 7 个缺失模型（MaliciousDomain, MaliciousIP, UpdateSchedule, ThreatIntelSource, ThreatIntelEntry, ThreatIntelApiKey, SyncTask）
+- **Mini 引擎同步** — IPv6 SSRF 防护、完整恶意关键词(150+)、URL缩短服务(70+)、可信域名(60+)
+- **任务数据清理** — Mini scan-engine 添加 15 分钟定时清理过期任务数据
+- **请求体大小限制** — Mini scan-engine `readBody()` 添加 1MB 默认上限
+
+### Changed
+
+- **Docker 优雅关闭** — `docker-entrypoint.sh` 不再使用 `exec`，确保 SIGTERM 信号正确传播
+- **API 元数据** — 根路由 `/api/` 返回应用名称、版本、状态
+- **健康检查** — `/api/health` 返回实际活跃任务数而非硬编码 0
+- **data-sync-service** — 修复 ESM 环境下 `__dirname` 不可用问题，改用 `import.meta.dirname`
+
+### Removed
+
+- **settings-dialog.tsx** — 删除过时死代码（使用错误的 localStorage key 和 rule ID）
+- **ignoreBuildErrors** — 移除 `next.config.ts` 中的 `ignoreBuildErrors: true`
+- **未使用代码** — 清理 scan-engine.ts 中未使用的 `MAX_REDIRECTS`、`BrowserRenderResult`、`decodeDataUri`
+
+---
+
 ## [v1.9.0] - 2026-05-31
 
 ### Added

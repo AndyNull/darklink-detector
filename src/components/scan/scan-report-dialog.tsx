@@ -100,10 +100,10 @@ function VisualBar({ value, max, color }: { value: number; max: number; color: s
 }
 
 export function ScanReportDialog({ open, onOpenChange, results, taskHistoryItem }: ScanReportDialogProps) {
-  const { getStats, getScanDuration, maliciousMatches } = useScanStore();
+  const { getStats, getFilteredDarkLinks, scanStartTime } = useScanStore();
 
   const stats = results.length > 0 ? getStats() : null;
-  const scanDuration = results.length > 0 ? getScanDuration() : null;
+  const scanDuration = scanStartTime ? Date.now() - scanStartTime : null;
 
   // Severity breakdown
   const allDarkLinks = results.flatMap(r => r.darkLinkDetails);
@@ -128,8 +128,9 @@ export function ScanReportDialog({ open, onOpenChange, results, taskHistoryItem 
   const allQrCodes = results.flatMap(r => r.qrCodeDetails);
   const suspiciousQrCodes = allQrCodes.filter(qr => qr.isSuspicious).length;
 
-  // Malicious match count
-  const maliciousMatchCount = Object.keys(maliciousMatches).length;
+  // Malicious match count — compute from filtered dark links
+  const maliciousDarkLinks = getFilteredDarkLinks();
+  const maliciousMatchCount = maliciousDarkLinks.length;
 
   // Risk assessment
   const totalDarkLinks = stats?.darkLinks ?? 0;
@@ -303,10 +304,10 @@ export function ScanReportDialog({ open, onOpenChange, results, taskHistoryItem 
               </div>
               {maliciousMatchCount > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
-                  {Object.entries(maliciousMatches).slice(0, 10).map(([domain, info]) => (
-                    <Badge key={domain} variant="destructive" className="text-[9px] px-1.5 py-0">
-                      {domain}
-                      {info.item?.reason && `: ${info.item.reason}`}
+                  {maliciousDarkLinks.slice(0, 10).map((link) => (
+                    <Badge key={link.url} variant="destructive" className="text-[9px] px-1.5 py-0">
+                      {link.url}
+                      {link.description && `: ${link.description.substring(0, 30)}`}
                     </Badge>
                   ))}
                   {maliciousMatchCount > 10 && (

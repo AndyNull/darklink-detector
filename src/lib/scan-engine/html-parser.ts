@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import type { UrlDetailData, DarkLinkData, DarkLinkType, Severity } from './types';
+import { TRUSTED_DOMAINS, URL_SHORTENERS, extractDomain, isValidDomain, isSuspiciousDomain } from './shared-constants';
 
 // ─── Public types ────────────────────────────────────────────────────────────
 
@@ -135,43 +136,7 @@ const MALICIOUS_KEYWORDS = [
 ];
 
 // ─── Suspicious URL shorteners ───────────────────────────────────────────────
-
-const URL_SHORTENERS = [
-  // Major international
-  'bit.ly', 't.cn', 'dwz.cn', 'suo.im', 'tinyurl.com',
-  'goo.gl', 'ow.ly', 'is.gd', 'buff.ly', 'rebrand.ly',
-  'cutt.ly', 'short.io', 'soo.gd', 'tny.im', 'v.gd',
-  'ht.ly', 'bl.ink', 'shorturl.at', 'tiny.cc',
-  'bit.do', 'mcaf.ee', 'su.pr', 'tr.im', 'cli.gs',
-  'scrnch.me', 'qr.ae', 'po.st', 'sp2.ro',
-  // Monetized / suspicious
-  'shrinke.me', 'clk.ink', 'adf.ly', 'bc.vc',
-  'sh.st', 'ouo.io', 'linkshrink.net',
-  // Chinese shorteners
-  'url.cn', 'amzn.to', 'rrd.me',
-  'dwz1.com', 't.hk0.cn', 'b23.tv', 'kuaibao.cn',
-  // Additional common shorteners
-  'trib.al', 'db.tt', 'disq.us',
-  'j.mp', 'lnkd.in', 'fxn.ws', 'on.wsj.com',
-  'flip.it', 'ow.ly', 'spoti.fi', 'apple.co', 'amzn.to',
-  'geni.us', 'shr.name', 'shorte.st', 'zi.ma',
-  '1w.al', '2no.co', '4fun.tw', '7.ly',
-  'a.co', 'adcrun.ch', 'adv.li', 'bc.vc',
-  'budurl.com', 'chilp.it', 'clck.ru', 'clicky.me',
-  'dsh.re', 'fat.ly', 'fla.sh', 'gdurl.com',
-  'git.io', 'go2l.ink', 'go.shr.lc', 'hyper.co',
-  'idek.net', 'is.gd', 'ker.fr', 'lc.chat',
-  'liinks.co', 'mercuri.co', 'migre.me', 'moourl.com',
-  'n9.cl', 'nn.nf', 'nowlinks.net', 'oec.io',
-  'ph.dog', 'picsee.co', 'polr.co', 'qslee.com',
-  'redirecting.at', 's2r.co', 'sc.link', 'sg.id',
-  'shor.by', 'shortcm.li', 'shortlink.in', 'shrtco.de',
-  'smms.in', 'snip.ly', 'soo.gd', 'sprmn.lol',
-  'surl.li', 't2m.io', 't.co', 'tiny.pl',
-  'tny.im', 'tr.ee', 'ubb.sh', 'urle.co',
-  'v.gd', 'v.gd', 'vzturl.com', 'yep.it',
-  'zip.net', 'zippi.tk',
-];
+// (imported from shared-constants.ts)
 
 // ─── Cheap / abusable TLDs ───────────────────────────────────────────────────
 
@@ -202,49 +167,7 @@ const URL_SHORTENERS_SET = new Set(URL_SHORTENERS);
 const CHEAP_TLDS_SET = new Set(CHEAP_TLDS);
 
 // ─── Trusted CDN/Service domains (whitelist for suspicious_domain detection) ───
-
-const TRUSTED_DOMAINS = new Set([
-  // Common CDNs
-  'cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com',
-  'ajax.googleapis.com', 'cdnjs.cloudflare.com', 'cdn.bootcdn.net',
-  'cdn.staticfile.org', 'unpkg.com', 'stackpath.bootstrapcdn.com',
-  'code.jquery.com', 'cdn.jsdelivr.net', 'maxcdn.bootstrapcdn.com',
-  // Chinese CDNs
-  'cdn.bootcdn.net', 'lib.baomitu.com', 'cdn.bytedance.com',
-  'lf3-cdn-tos.bytecdntp.com', 'lf6-cdn-tos.bytecdntp.com',
-  'lf9-cdn-tos.bytecdntp.com', 'cdn.staticfile.org',
-  // Analytics & Tag Managers
-  'www.googletagmanager.com', 'www.google-analytics.com',
-  'connect.facebook.net', 'analytics.tiktok.com',
-  'hm.baidu.com', 'zz.bdstatic.com', 's19.cnzz.com', 'cnzz.com',
-  'tongji.baidu.com', 'api.mapbox.com', 'cdn.ampproject.org',
-  'plausible.io', 'matomo.org',
-  'analytics.google.com', 'region1.google-analytics.com',
-  'tagmanager.google.com', 'static.hotjar.com',
-  'cdn.mxpnl.com', 'sentry.io', 'browser.sentry-cdn.com',
-  // Social / Sharing
-  'platform.twitter.com', 'connect.facebook.net', 'apis.google.com',
-  'static.addtoany.com', 'assets.pinterest.com',
-  'cdn.jsdelivr.net', 'sdn.geetest.com',
-  'api-share.facebook.com', 'www.facebook.com',
-  'graph.facebook.com', 'syndication.twitter.com',
-  // Common legit services on cheap TLDs
-  'github.io', 'netlify.app', 'vercel.app', 'herokuapp.com',
-  'pages.dev', 'surge.sh', 'gitlab.io', 'readthedocs.io',
-  'cloudfront.net', 'amazonaws.com', 'azureedge.net',
-  // Cloud services
-  'azurewebsites.net', 'cloudapp.net', 'compute.amazonaws.com',
-  'elasticbeanstalk.com', 'firebaseapp.com', 'firebaseio.com',
-  'onrender.com', 'railway.app', 'fly.dev',
-  'deno.dev', 'supabase.co', 'hasura.app',
-  // Common services
-  'cdn.sstatic.net', 'i.stack.imgur.com',
-  'payments.stripe.com', 'js.stripe.com',
-  'checkout.stripe.com', 'api.stripe.com',
-  'js.braintreegateway.com', 'assets.braintreegateway.com',
-  'www.paypal.com', 'api.paypal.com',
-  'cdn.shopify.com', 'monorail-edge.shopifysvc.com',
-]);
+// (imported from shared-constants.ts)
 
 // ─── Legit services on cheap TLDs (skip cheap_tld detection for these) ────────
 
@@ -469,7 +392,7 @@ export function parseHtml(html: string, baseUrl: string, disabledRules: string[]
     const height = $(el).attr('height') || getCssValue($, el, 'height');
     const style = ($(el).attr('style') || '').replace(/\s+/g, '').toLowerCase();
 
-    if (isZeroSize(width) || isZeroSize(height) || style.includes('display:none') || style.includes('visibility:hidden')) {
+    if (isZeroSize(width) || isZeroSize(height) || isOnePixelSize(width) || isOnePixelSize(height) || style.includes('display:none') || style.includes('visibility:hidden')) {
       const dlDomain = extractDomain(resolvedUrl);
       const dedupKey = `${dlDomain}|iframe_hidden`;
       if (!darkLinkSeen.has(dedupKey)) {
@@ -2547,54 +2470,7 @@ export function extractExternalResources(html: string, baseUrl: string): { jsUrl
 }
 
 // ─── Utility functions ───────────────────────────────────────────────────────
-
-function extractDomain(url: string): string | null {
-  try {
-    const hostname = new URL(url).hostname;
-    if (!isValidDomain(hostname)) return null;
-    return hostname;
-  } catch {
-    return null;
-  }
-}
-
-// Validate that a hostname is a meaningful domain (not single chars, punycode fragments, etc.)
-function isValidDomain(hostname: string): boolean {
-  if (!hostname || hostname.length === 0) return false;
-
-  // Allow IPv4 addresses
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return true;
-
-  // Allow IPv6 addresses in brackets
-  if (hostname.startsWith('[') && hostname.endsWith(']')) return true;
-
-  // Reject single-character hostnames (a, b, x, etc.)
-  if (hostname.length < 3) return false;
-
-  // Reject hostnames without a dot (no TLD) — e.g., "localhost" is ok but single words are not
-  // Exception: "localhost" is valid for local development
-  if (!hostname.includes('.')) {
-    return hostname === 'localhost';
-  }
-
-  // Reject punycode-only hostnames without a valid TLD structure
-  // e.g., "xn--e1aybc" is just a punycode prefix without a real domain
-  const parts = hostname.split('.');
-  // Must have at least 2 parts (e.g., example.com)
-  if (parts.length < 2) return false;
-
-  // TLD must be at least 2 characters
-  const tld = parts[parts.length - 1];
-  if (tld.length < 2) return false;
-
-  // Each non-TLD part must be at least 1 character (which is already guaranteed by split)
-  // But reject parts that are purely numeric (not valid domain labels unless it's an IP)
-  for (const part of parts) {
-    if (part.length === 0) return false;
-  }
-
-  return true;
-}
+// extractDomain, isValidDomain, and isSuspiciousDomain are imported from shared-constants.ts
 
 export function resolveUrl(raw: string, base: string): string | null {
   try {
@@ -2626,8 +2502,12 @@ export function resolveUrl(raw: string, base: string): string | null {
 
 function isZeroSize(value: string | undefined): boolean {
   if (!value) return false;
-  const num = parseInt(value);
-  return num === 0 || num === 1;
+  return parseInt(value) === 0;
+}
+
+function isOnePixelSize(value: string | undefined): boolean {
+  if (!value) return false;
+  return parseInt(value) === 1;
 }
 
 function getCssValue($: cheerio.CheerioAPI, el: any, prop: string): string {
@@ -2640,24 +2520,7 @@ function normalizeColor(color: string): string {
   return color.toLowerCase().replace(/\s/g, '');
 }
 
-function isSuspiciousDomain(domain: string, baseDomain: string): boolean {
-  const baseParts = baseDomain.split('.');
-  const domainParts = domain.split('.');
-
-  if (baseParts.length >= 2 && domainParts.length >= 2) {
-    const baseTld = baseParts.slice(-1)[0];
-    const domainTld = domainParts.slice(-1)[0];
-    if (baseTld !== domainTld) return true;
-  }
-
-  if (baseParts.length >= 2 && domainParts.length >= 2) {
-    const baseSld = baseParts.slice(-2)[0];
-    const domainSld = domainParts.slice(-2)[0];
-    if (baseSld !== domainSld) return true;
-  }
-
-  return false;
-}
+// isSuspiciousDomain is imported from shared-constants.ts
 
 // ─── Sublink mining: extract all URLs without domain-level dedup ────────────
 

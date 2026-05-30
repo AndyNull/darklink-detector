@@ -8,6 +8,7 @@ import {
   type ServiceName,
 } from '@/lib/engine-manager';
 import { auditLog } from '@/lib/audit-logger';
+import { safeErrorResponse } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -141,9 +142,6 @@ export async function POST(request: NextRequest) {
     );
   } catch (err) {
     console.error('[ENGINE] Start error:', err);
-    return NextResponse.json(
-      { error: (err as Error).message },
-      { status: 500 }
-    );
+    return safeErrorResponse(err, '引擎启动失败');
   }
 }

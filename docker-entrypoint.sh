@@ -86,14 +86,17 @@ cleanup() {
   echo "正在停止所有服务..."
   kill $SCAN_PID 2>/dev/null || true
   kill $SYNC_PID 2>/dev/null || true
-  # 给子进程时间清理
-  sleep 2
+  kill $MAIN_PID 2>/dev/null || true
+  wait
   echo "所有服务已停止"
   exit 0
 }
 
 trap cleanup SIGTERM SIGINT
 
-# 启动 Next.js standalone server（前台运行）
+# 启动 Next.js standalone server（后台运行）
 # standalone 模式输出的是 node 格式的 server.js，bun 兼容运行
-exec bun server.js
+bun server.js &
+MAIN_PID=$!
+
+wait $MAIN_PID

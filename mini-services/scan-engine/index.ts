@@ -8,6 +8,22 @@ const taskResults = new Map<string, ScanResultData[]>();
 const taskProgress = new Map<string, ScanProgress>();
 const taskLogs = new Map<string, LogEntry[]>();
 
+// Periodic cleanup of expired tasks
+const TASK_TTL = 3600_000; // 1 hour
+const CLEANUP_INTERVAL = 15 * 60 * 1000; // 15 minutes
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, progress] of taskProgress) {
+    if (progress.completedAt && now - progress.completedAt > TASK_TTL) {
+      taskResults.delete(id);
+      taskProgress.delete(id);
+      taskLogs.delete(id);
+      console.log(`Cleaned up expired task: ${id}`);
+    }
+  }
+}, CLEANUP_INTERVAL);
+
 const PORT = 3003;
 
 // Create HTTP server with REST API support
@@ -59,9 +75,7 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
       };
 
       const onResult = (result: ScanResultData) => {
-        const results = taskResults.get(taskId) || [];
-        results.push(result);
-        taskResults.set(taskId, results);
+        taskResults.set(taskId, [...(taskResults.get(taskId) || []), result]);
         try {
           const serialized = JSON.parse(safeStringify({ taskId, result }));
           io.emit('scan:result', serialized);
@@ -71,9 +85,7 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
       };
 
       const onLog = (log: LogEntry) => {
-        const logs = taskLogs.get(taskId) || [];
-        logs.push(log);
-        taskLogs.set(taskId, logs);
+        taskLogs.set(taskId, [...(taskLogs.get(taskId) || []), log]);
         try {
           const serialized = JSON.parse(safeStringify({ taskId, ...log }));
           io.emit('scan:log', serialized);
@@ -176,10 +188,16 @@ function safeStringify(obj: any): string {
 }
 
 // Helper to read request body
-function readBody(req: IncomingMessage): Promise<string> {
+function readBody(req: IncomingMessage, maxSize: number = 1024 * 1024): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = '';
-    req.on('data', (chunk) => { body += chunk; });
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > maxSize) {
+        reject(new Error('Request body too large'));
+        req.destroy();
+      }
+    });
     req.on('end', () => resolve(body));
     req.on('error', reject);
   });
@@ -216,9 +234,7 @@ io.on('connection', (socket) => {
     };
 
     const onResult = (result: ScanResultData) => {
-      const results = taskResults.get(taskId) || [];
-      results.push(result);
-      taskResults.set(taskId, results);
+      taskResults.set(taskId, [...(taskResults.get(taskId) || []), result]);
       try {
         const s = JSON.parse(safeStringify({ taskId, result }));
         io.emit('scan:result', s);
@@ -226,9 +242,7 @@ io.on('connection', (socket) => {
     };
 
     const onLog = (log: LogEntry) => {
-      const logs = taskLogs.get(taskId) || [];
-      logs.push(log);
-      taskLogs.set(taskId, logs);
+      taskLogs.set(taskId, [...(taskLogs.get(taskId) || []), log]);
       try {
         const s = JSON.parse(safeStringify({ taskId, ...log }));
         io.emit('scan:log', s);

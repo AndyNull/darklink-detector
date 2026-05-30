@@ -35,51 +35,84 @@ const TLD_LIST = [
 ].join('|');
 
 // ─── Malicious keywords (Chinese + English) ──────────────────────────────────
+// Synced from src/lib/scan-engine/html-parser.ts
 
 const MALICIOUS_KEYWORDS = [
-  // Chinese malicious keywords - 暗链常见中文关键词
-  '赌博', '彩票', '色情', '成人网站', '贷款', '借款', '代孕', '办证', '刷单',
-  '赌场', '博彩', '色网', '招嫖', '仿牌', '假证', '私服', '外挂',
-  '黑客', '钓鱼', '木马', '挂马', '暗网', '洗钱', '传销', '诈骗',
-  '六合彩', '威尼斯人', '金沙', '太阳城', '博狗', '新葡京', '永利', '美高梅',
-  '时时彩', '澳门', '葡京', '皇冠', '188bet', 'bet365', 'betway', '1xbet',
-  '小贷', '网贷', '现金贷', '黑彩', '私彩', '福利彩', '幸运彩票',
-  '网络赌博', '在线赌场', '时时彩平台',
-  '极速赛车', '飞艇', '快3', '快三',
+  // ─── Chinese malicious keywords - 暗链常见中文关键词 ───
+  // 赌博/博彩
+  '赌博', '彩票', '赌场', '博彩', '六合彩', '时时彩', '网络赌博', '在线赌场',
+  '时时彩平台', '极速赛车', '飞艇', '快3', '快三', '黑彩', '私彩', '福利彩',
+  '澳门', '葡京', '皇冠', '威尼斯人', '金沙', '太阳城', '博狗', '新葡京', '永利', '美高梅',
+  '188bet', 'bet365', 'betway', '1xbet',
   'AG百家乐', 'BBIN', 'PT电子',
-  '微信加粉', '涨粉', '买粉',
-  '代开', '代发', '代刷',
-  '成人直播', '色播', '裸聊',
-  '黑产', '网赚', '刷信誉',
-  // Chinese - additional gambling/casino
   '皇冠体育', '乐鱼体育', '九游会', '尊龙凯时', '开元棋牌',
   '棋牌游戏', '斗地主赢钱', '抢庄牛牛', '龙虎斗', '真人荷官',
   '注册领红包', '充值赠送', '首存优惠', '存送优惠', '反水优惠',
   '百家乐', '21点', '老虎机', '转盘', '摇钱树',
-  // Chinese - crypto scam
+  '幸运彩票', '彩票预测', '开奖结果', '彩票助手',
+  '老虎机攻略', '百家乐公式', '必赢策略', '包赢',
+  // 色情/成人
+  '色情', '成人网站', '色网', '招嫖', '成人直播', '色播', '裸聊',
+  '同城约', '一夜情', '约炮', '裸聊', '色诱',
+  // 贷款/金融
+  '贷款', '借款', '小贷', '网贷', '现金贷',
+  // 非法服务
+  '代孕', '办证', '刷单', '仿牌', '假证', '私服', '外挂',
+  '微信加粉', '涨粉', '买粉', '代开', '代发', '代刷',
+  '黑客', '钓鱼', '木马', '挂马', '暗网', '洗钱', '传销', '诈骗',
+  '黑产', '网赚', '刷信誉',
+  // 加密货币诈骗
   '量化交易', '合约交易', '币圈', '炒币', '虚拟货币投资', '数字货币投资',
   '申购分红', '认购返利', '理财收益保障', '高频套利', '保本理财',
-  // Chinese - phishing/credential harvesting
+  '数字货币平台', '虚拟币交易', '加密资产', '币圈韭菜', '空气币',
+  // 钓鱼/身份盗窃
   '身份验证过期', '账号异常', '安全认证', '实名补录', '密码过期', '限制登录', '账号解冻',
   '紧急通知', '系统升级验证', '安全风险', '账户被锁', '实名认证过期',
-  // Japanese malicious keywords (暗链常见日语关键词)
+  '银行卡冻结', '微信支付异常', '支付宝异常', '验证身份',
+  // 诈骗相关
+  '兼职刷单', '淘宝刷单', '刷信誉兼职', '日赚千元', '轻松赚钱',
+  '网络兼职', '在家赚钱', '手机赚钱', '免费赚钱',
+  '高息理财', '稳赚不赔', '投资返利', '天天分红',
+  '仿品', '高仿', '精仿', '原单', '尾单',
+  // 赌博平台
+  'AG平台', 'MG平台', 'PT平台', 'BG平台', 'GG平台',
+  '开元平台', '乐游平台', '皇冠平台',
+  '百家乐打法', '龙虎和路', '捕鱼达人', '牛牛规则',
+  // SEO作弊
+  '外链代发', '黑帽SEO', '快排', '刷排名', '刷流量', '刷点击',
+  '站群', '蜘蛛池', '权重出售', '友链出售',
+  // 钓鱼关键词
+  '官方客服', '在线客服', '客服QQ', '客服微信',
+  '限时优惠', '仅限今日', '最后机会',
+  // 违法医疗
+  '代孕妈妈', '试管代孕', '精子库', '卵子出售',
+  '壮阳药', '延时药', '增大药', '性药',
+  // 仿冒/走私
+  '高仿手表', '高仿包包', '精仿鞋子', 'A货',
+  '走私车', '抵押车', '二手车低价',
+  '仿真枪', '电击器', '防身器材',
+  // ─── Japanese malicious keywords (暗链常见日语关键词) ───
   'ギャンブル', 'カジノ', '賭博', 'ポーカー', 'スロット',
   '出会い系', '風俗', 'アダルト', 'エロ', '裸',
   '闇金', '借入', '融資', '即日融資',
   'パチンコ', 'パチスロ', '競馬', '競艇', 'オートレース',
   '偽造', 'マルウェア', 'フィッシング',
   'ベラジョン', 'ビットカジノ', 'カジノシークレット', 'ジパングカジノ',
-  // Korean malicious keywords (暗链常见韩語关键词)
+  '出会い', '割り切り', 'デリヘル', 'ソープ',
+  '闇バイト', '軽作業', '高収入',
+  // ─── Korean malicious keywords (暗链常见韩語关键词) ───
   '도박', '카지노', '베팅', '포커', '슬롯',
   '성인', '음란', '유흥', '출장마사지',
   '대출', '급전', '일수', '대부',
   '바카라', '룰렛', '블랙잭', '스포츠토토', '사설바카라',
   '위조', '피싱', '악성코드',
   '우리카지노', '코인카지노', '온카지노',
-  // Russian malicious keywords (暗链常见俄语关键词)
+  '먹튀', '토토사이트', '안전놀이터',
+  // ─── Russian malicious keywords (暗链常见俄语关键词) ───
   'казино', 'рулетка', 'слот', 'букмекер', 'ставка',
   'вулкан', 'азино', 'эльдорадо', 'джойказино',
-  // English malicious keywords
+  'подделка', 'взлом', 'фишинг', 'мошенничество',
+  // ─── English malicious keywords ───
   'gambling', 'casino', 'betting', 'poker', 'slot',
   'pharma', 'viagra', 'cialis', 'levitra', 'oxycodone',
   'porn', 'adult-content', 'adult-chat', 'xxx', 'naked', 'escort',
@@ -88,32 +121,64 @@ const MALICIOUS_KEYWORDS = [
   'phishing', 'malware', 'ransomware', 'trojan',
   'counterfeit', 'replica', 'fake-id',
   'crypto-scam', 'ponzi', 'hyip', 'ico-scam',
-  // Path patterns commonly used for dark links
+  'blackhat', 'exploit-kit', 'c2-server', 'botnet',
+  'steroids', 'anabolic', 'xanax', 'adderall',
+  'forex-scam', 'binary-options', 'investment-scam',
+  'email-harvest', 'credential-stuffing', 'brute-force',
+  // ─── Suspicious path patterns commonly used for dark links ───
   '/go.php', '/link.php', '/redirect.php', '/jump.php', '/out.php',
   '/go.html', '/link.html', '/url.php', '/click.php',
   '/tj.php', '/st.php', '/count.php', '/track.php', '/aff.php', '/ref.php',
   '/t.php', '/s.php', '/tu.php', '/ad.php', '/ads.php',
   '/jump/', '/go/', '/out/', '/redirect/', '/click/', '/aff/', '/ref/',
+  '/goto/', '/forward/', '/redir/', '/traffic/', '/promo/',
+  '/partner/', '/sponsor/', '/campaign/', '/landing/',
 ];
 
 // ─── Suspicious URL shorteners ───────────────────────────────────────────────
+// Synced from src/lib/scan-engine/shared-constants.ts
 
 const URL_SHORTENERS = [
+  // Major international
   'bit.ly', 't.cn', 'dwz.cn', 'suo.im', 'tinyurl.com',
   'goo.gl', 'ow.ly', 'is.gd', 'buff.ly', 'rebrand.ly',
   'cutt.ly', 'short.io', 'soo.gd', 'tny.im', 'v.gd',
-  'url.cn', 'amzn.to', 'trib.al', 'db.tt', 'disq.us',
-  'j.mp', 'lnkd.in', 'fxn.ws', 'on.wsj.com',
-  'b23.tv', 'bilibili.com', 'kuaibao.cn',
-  'dwz1.com', 't.hk0.cn', 'rrd.me',
   'ht.ly', 'bl.ink', 'shorturl.at', 'tiny.cc',
   'bit.do', 'mcaf.ee', 'su.pr', 'tr.im', 'cli.gs',
   'scrnch.me', 'qr.ae', 'po.st', 'sp2.ro',
+  // Monetized / suspicious
   'shrinke.me', 'clk.ink', 'adf.ly', 'bc.vc',
   'sh.st', 'ouo.io', 'linkshrink.net',
+  // Chinese shorteners
+  'url.cn', 'amzn.to', 'rrd.me',
+  'dwz1.com', 't.hk0.cn', 'b23.tv', 'kuaibao.cn',
+  // Additional common shorteners
+  'trib.al', 'db.tt', 'disq.us',
+  'j.mp', 'lnkd.in', 'fxn.ws', 'on.wsj.com',
+  'flip.it', 'spoti.fi', 'apple.co',
+  'geni.us', 'shr.name', 'shorte.st', 'zi.ma',
+  '1w.al', '2no.co', '4fun.tw', '7.ly',
+  'a.co', 'adcrun.ch', 'adv.li',
+  'budurl.com', 'chilp.it', 'clck.ru', 'clicky.me',
+  'dsh.re', 'fat.ly', 'fla.sh', 'gdurl.com',
+  'git.io', 'go2l.ink', 'go.shr.lc', 'hyper.co',
+  'idek.net', 'ker.fr', 'lc.chat',
+  'liinks.co', 'mercuri.co', 'migre.me', 'moourl.com',
+  'n9.cl', 'nn.nf', 'nowlinks.net', 'oec.io',
+  'ph.dog', 'picsee.co', 'polr.co', 'qslee.com',
+  'redirecting.at', 's2r.co', 'sc.link', 'sg.id',
+  'shor.by', 'shortcm.li', 'shortlink.in', 'shrtco.de',
+  'smms.in', 'snip.ly', 'sprmn.lol',
+  'surl.li', 't2m.io', 't.co', 'tiny.pl',
+  'tr.ee', 'ubb.sh', 'urle.co',
+  'vzturl.com', 'yep.it',
+  'zip.net', 'zippi.tk',
+  // Additional from qr-detector.ts
+  'suolink.cn', 'rb.gy', 'cli.re',
 ];
 
 // ─── Cheap / abusable TLDs ───────────────────────────────────────────────────
+// Synced from src/lib/scan-engine/html-parser.ts
 
 const CHEAP_TLDS = [
   'xyz', 'top', 'cc', 'vip', 'club', 'site', 'online', 'info',
@@ -122,6 +187,18 @@ const CHEAP_TLDS = [
   'download', 'stream', 'racing', 'win', 'review', 'science',
   'accountant', 'faith', 'cricket', 'pw', 'gq', 'cf', 'ml', 'ga', 'tk',
   'buzz', 'icu', 'monster', 'cam', 'cyou', 'rest', 'bar', 'bond', 'cfd', 'sbs',
+  // Additional cheap/abusable TLDs
+  'fun', 'host', 'press', 'website', 'space', 'tech', 'store',
+  'work', 'law', 'beer', 'fit', 'yoga', 'run', 'pub', 'wiki', 'design',
+  'live', 'studio', 'red', 'pro', 'app', 'dev', 'ai',
+  'surf', 'skin', 'hair', 'beauty', 'mom', 'dad', 'lol', 'gay',
+  'quest', 'place', 'world', 'zone', 'cool', 'ninja', 'rocks',
+  'help', 'how', 'guide', 'directory', 'services', 'solutions',
+  'agency', 'builders', 'catering', 'cleaning', 'contractors',
+  'dentist', 'engineer', 'florist', 'guru', 'immobilien',
+  'international', 'lighting', 'plumbing', 'repairs', 'shoes',
+  'cheap', 'discount', 'free', 'promo', 'deals', 'bargain',
+  'bid', 'auction', 'market', 'marketplace',
 ];
 
 // ─── Performance: Pre-compile Sets for O(1) lookup ─────────────────────────────
@@ -130,35 +207,61 @@ const URL_SHORTENERS_SET = new Set(URL_SHORTENERS);
 const CHEAP_TLDS_SET = new Set(CHEAP_TLDS);
 
 // ─── Trusted CDN/Service domains (whitelist for suspicious_domain detection) ───
+// Synced from src/lib/scan-engine/shared-constants.ts
 
 const TRUSTED_DOMAINS = new Set([
   // Common CDNs
   'cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com',
   'ajax.googleapis.com', 'cdnjs.cloudflare.com', 'cdn.bootcdn.net',
   'cdn.staticfile.org', 'unpkg.com', 'stackpath.bootstrapcdn.com',
-  'code.jquery.com', 'cdn.jsdelivr.net', 'maxcdn.bootstrapcdn.com',
+  'code.jquery.com', 'maxcdn.bootstrapcdn.com',
+  // Chinese CDNs
+  'lib.baomitu.com', 'cdn.bytedance.com',
+  'lf3-cdn-tos.bytecdntp.com', 'lf6-cdn-tos.bytecdntp.com',
+  'lf9-cdn-tos.bytecdntp.com',
   // Analytics & Tag Managers
   'www.googletagmanager.com', 'www.google-analytics.com',
   'connect.facebook.net', 'analytics.tiktok.com',
   'hm.baidu.com', 'zz.bdstatic.com', 's19.cnzz.com', 'cnzz.com',
   'tongji.baidu.com', 'api.mapbox.com', 'cdn.ampproject.org',
   'plausible.io', 'matomo.org',
+  'analytics.google.com', 'region1.google-analytics.com',
+  'tagmanager.google.com', 'static.hotjar.com',
+  'cdn.mxpnl.com', 'sentry.io', 'browser.sentry-cdn.com',
   // Social / Sharing
-  'platform.twitter.com', 'connect.facebook.net', 'apis.google.com',
+  'platform.twitter.com', 'apis.google.com',
   'static.addtoany.com', 'assets.pinterest.com',
+  'sdn.geetest.com', 'api-share.facebook.com', 'www.facebook.com',
+  'graph.facebook.com', 'syndication.twitter.com',
   // Common legit services on cheap TLDs
   'github.io', 'netlify.app', 'vercel.app', 'herokuapp.com',
   'pages.dev', 'surge.sh', 'gitlab.io', 'readthedocs.io',
   'cloudfront.net', 'amazonaws.com', 'azureedge.net',
+  // Cloud services
+  'azurewebsites.net', 'cloudapp.net', 'compute.amazonaws.com',
+  'elasticbeanstalk.com', 'firebaseapp.com', 'firebaseio.com',
+  'onrender.com', 'railway.app', 'fly.dev',
+  'deno.dev', 'supabase.co', 'hasura.app',
+  // Common services
+  'cdn.sstatic.net', 'i.stack.imgur.com',
+  'payments.stripe.com', 'js.stripe.com',
+  'checkout.stripe.com', 'api.stripe.com',
+  'js.braintreegateway.com', 'assets.braintreegateway.com',
+  'www.paypal.com', 'api.paypal.com',
+  'cdn.shopify.com', 'monorail-edge.shopifysvc.com',
 ]);
 
 // ─── Legit services on cheap TLDs (skip cheap_tld detection for these) ────────
+// Synced from src/lib/scan-engine/html-parser.ts
 
 const LEGIT_CHEAP_TLD_DOMAINS = new Set([
   'github.io', 'netlify.app', 'vercel.app', 'herokuapp.com',
   'pages.dev', 'surge.sh', 'gitlab.io', 'readthedocs.io',
   'cloudfront.net', 'amazonaws.com', 'azureedge.net',
   'slack-edge.com', 'atlassian.net', 'shopify.com',
+  'onrender.com', 'railway.app', 'fly.dev', 'deno.dev',
+  'supabase.co', 'hasura.app', 'firebaseapp.com',
+  'elasticbeanstalk.com', 'azurewebsites.net',
 ]);
 
 // ─── Pre-compiled malicious keyword regex for fast matching ────────────────────

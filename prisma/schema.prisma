@@ -23,6 +23,9 @@ model ScanTask {
   updatedAt     DateTime     @updatedAt
   results       ScanResult[]
   logs          ScanLog[]
+
+  @@index([status])
+  @@index([createdAt])
 }
 
 model ScanResult {
@@ -45,6 +48,9 @@ model ScanResult {
   urlDetails      UrlDetail[]
   darkLinkDetails DarkLink[]
   qrCodeDetails   QrCodeResult[]
+
+  @@index([taskId])
+  @@index([status])
 }
 
 model UrlDetail {
@@ -60,6 +66,9 @@ model UrlDetail {
   hideReason  String? // reason if not visible
   createdAt   DateTime   @default(now())
   result      ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+
+  @@index([resultId])
+  @@index([domain])
 }
 
 model DarkLink {
@@ -74,6 +83,9 @@ model DarkLink {
   evidence    String? // CSS rule, HTML snippet, etc.
   createdAt   DateTime   @default(now())
   result      ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+
+  @@index([resultId])
+  @@index([severity])
 }
 
 model QrCodeResult {
@@ -86,6 +98,8 @@ model QrCodeResult {
   qrImageBase64 String? // base64 encoded source image for QR code verification
   createdAt     DateTime   @default(now())
   result        ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+
+  @@index([resultId])
 }
 
 model ScanLog {
@@ -96,6 +110,9 @@ model ScanLog {
   detail    String?
   createdAt DateTime @default(now())
   task      ScanTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([level])
 }
 
 model MaliciousDomain {

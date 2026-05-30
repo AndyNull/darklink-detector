@@ -1,8 +1,9 @@
 import { parseHtml, extractImageUrls, extractExternalResources, extractUrlsFromJs, extractUrlsFromCssContent as extractUrlsFromCss, resolveUrl } from './html-parser';
 import { detectQrCodes, detectQrCodesFromUrls, detectQrCodesFromDataUri } from './qr-detector';
-import { getBrowserHeaders, getNextFingerprint, getResourceHeaders, fetchWithRedirectControl, MAX_REDIRECTS, type BrowserFingerprint } from './browser-sim';
-import { renderPageForImages, closeBrowser as closeBrowserRenderer, type BrowserRenderResult } from './browser-renderer';
+import { getBrowserHeaders, getNextFingerprint, getResourceHeaders, fetchWithRedirectControl, type BrowserFingerprint } from './browser-sim';
+import { renderPageForImages, closeBrowser as closeBrowserRenderer } from './browser-renderer';
 import { validateResolvedIP } from '../security';
+import { TRUSTED_DOMAINS, extractDomain, isValidDomain, isSuspiciousDomain } from './shared-constants';
 import type { ScanRequest, ScanResultData, UrlConfig, ScanProgress, LogEntry, TaskStatus, UrlDetailData, DarkLinkData, QrCodeData } from './types';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -295,27 +296,6 @@ function isDataUri(url: string): boolean {
   return url.startsWith('data:');
 }
 
-// Helper: decode a data: URI to a Buffer
-function decodeDataUri(dataUri: string): Buffer | null {
-  try {
-    // data:[<mediatype>][;base64],<data>
-    const commaIdx = dataUri.indexOf(',');
-    if (commaIdx === -1) return null;
-
-    const meta = dataUri.substring(0, commaIdx);
-    const data = dataUri.substring(commaIdx + 1);
-    const isBase64 = meta.includes(';base64');
-
-    if (isBase64) {
-      return Buffer.from(data, 'base64');
-    } else {
-      return Buffer.from(decodeURIComponent(data), 'utf-8');
-    }
-  } catch {
-    return null;
-  }
-}
-
 // Helper: detect QR codes from data: URI images directly (no HTTP fetch)
 async function detectQrFromDataUris(dataUris: string[]): Promise<QrCodeData[]> {
   const results: QrCodeData[] = [];
@@ -397,49 +377,7 @@ function analyzeUrlsForDarkLinks(
   return { urlDetails, darkLinkDetails };
 }
 
-// Helper: extract domain from URL
-function extractDomain(url: string): string | null {
-  try {
-    const hostname = new URL(url).hostname;
-    if (!isValidDomain(hostname)) return null;
-    return hostname;
-  } catch {
-    return null;
-  }
-}
-
-// Validate that a hostname is a meaningful domain (not single chars, punycode fragments, etc.)
-function isValidDomain(hostname: string): boolean {
-  if (!hostname || hostname.length === 0) return false;
-
-  // Allow IPv4 addresses
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return true;
-
-  // Allow IPv6 addresses in brackets
-  if (hostname.startsWith('[') && hostname.endsWith(']')) return true;
-
-  // Reject single-character hostnames (a, b, x, etc.)
-  if (hostname.length < 3) return false;
-
-  // Reject hostnames without a dot (no TLD)
-  if (!hostname.includes('.')) {
-    return hostname === 'localhost';
-  }
-
-  // Reject punycode-only hostnames without a valid TLD structure
-  const parts = hostname.split('.');
-  if (parts.length < 2) return false;
-
-  // TLD must be at least 2 characters
-  const tld = parts[parts.length - 1];
-  if (tld.length < 2) return false;
-
-  for (const part of parts) {
-    if (part.length === 0) return false;
-  }
-
-  return true;
-}
+// extractDomain, isValidDomain, isSuspiciousDomain imported from shared-constants.ts
 
 // IP address regex for dedup key extraction
 const IP_REGEX = /^(\d{1,3}\.){3}\d{1,3}$/;
@@ -455,51 +393,8 @@ function extractDedupKey(url: string, domain?: string): string {
   }
 }
 
-// Trusted CDN/Service domains - skip suspicious_domain detection for these
-const TRUSTED_DOMAINS_ENGINE = new Set([
-  'cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com',
-  'ajax.googleapis.com', 'cdnjs.cloudflare.com', 'cdn.bootcdn.net',
-  'cdn.staticfile.org', 'unpkg.com', 'stackpath.bootstrapcdn.com',
-  'code.jquery.com', 'maxcdn.bootstrapcdn.com',
-  'lib.baomitu.com', 'cdn.bytedance.com',
-  'www.googletagmanager.com', 'www.google-analytics.com',
-  'connect.facebook.net', 'analytics.tiktok.com',
-  'hm.baidu.com', 'zz.bdstatic.com', 's19.cnzz.com', 'cnzz.com',
-  'tongji.baidu.com', 'api.mapbox.com', 'cdn.ampproject.org',
-  'analytics.google.com', 'static.hotjar.com',
-  'sentry.io', 'browser.sentry-cdn.com',
-  'platform.twitter.com', 'apis.google.com',
-  'github.io', 'netlify.app', 'vercel.app', 'herokuapp.com',
-  'pages.dev', 'surge.sh', 'gitlab.io', 'readthedocs.io',
-  'cloudfront.net', 'amazonaws.com', 'azureedge.net',
-  'onrender.com', 'railway.app', 'fly.dev', 'deno.dev',
-  'supabase.co', 'hasura.app', 'firebaseapp.com',
-  'payments.stripe.com', 'js.stripe.com', 'cdn.shopify.com',
-]);
-
-// Helper: check if a domain is suspicious relative to the base domain
-// Improved: skip trusted CDN/analytic domains to reduce false positives
-function isSuspiciousDomain(domain: string, baseDomain: string): boolean {
-  // Skip trusted domains entirely
-  if (TRUSTED_DOMAINS_ENGINE.has(domain)) return false;
-
-  const baseParts = baseDomain.split('.');
-  const domainParts = domain.split('.');
-
-  if (baseParts.length >= 2 && domainParts.length >= 2) {
-    const baseTld = baseParts.slice(-1)[0];
-    const domainTld = domainParts.slice(-1)[0];
-    if (baseTld !== domainTld) return true;
-  }
-
-  if (baseParts.length >= 2 && domainParts.length >= 2) {
-    const baseSld = baseParts.slice(-2)[0];
-    const domainSld = domainParts.slice(-2)[0];
-    if (baseSld !== domainSld) return true;
-  }
-
-  return false;
-}
+// TRUSTED_DOMAINS (imported from shared-constants.ts) replaces the old TRUSTED_DOMAINS_ENGINE.
+// isSuspiciousDomain (imported from shared-constants.ts) uses TRUSTED_DOMAINS directly.
 
 // Fetch a single external resource with timeout and error handling
 // NOTE: External resource URLs (JS/CSS) are extracted from scanned page HTML.
@@ -949,6 +844,21 @@ export async function executeScan(
           // that reject Node.js fetch but allow curl's browser-like TLS fingerprint
           if ((fallbackError as Error).name !== 'AbortError' && !abortController.signal.aborted) {
             emitLog('info', `简单请求也失败，尝试curl回退: ${urlConfig.url}`);
+
+            // DNS rebinding check before curl fallback
+            try {
+              const urlObj = new URL(urlConfig.url);
+              if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(urlObj.hostname)) {
+                const { address: resolvedIp } = await lookup(urlObj.hostname);
+                if (!validateResolvedIP(resolvedIp)) {
+                  throw new Error(`DNS resolution for ${urlObj.hostname} points to private/reserved IP: ${resolvedIp}`);
+                }
+              }
+            } catch (dnsErr: any) {
+              if (dnsErr.message?.includes('private/reserved IP')) throw dnsErr;
+              // DNS lookup failed - proceed with curl (it may also fail)
+            }
+
             try {
               const curlResult = await fetchWithCurl(urlConfig.url, timeout, urlConfig.headers, fingerprint.userAgent);
               if (curlResult.html && curlResult.html.length > 0) {
@@ -1179,6 +1089,21 @@ export async function executeScan(
       // =====================================================
       if (isAntiBotChallengePage(html)) {
         emitLog('info', `检测到反爬虫挑战页面(短页面含反爬标记)，快速回退curl: ${urlConfig.url}`, `HTML长度: ${html.length}`);
+
+        // DNS rebinding check before curl fallback
+        try {
+          const urlObj = new URL(urlConfig.url);
+          if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(urlObj.hostname)) {
+            const { address: resolvedIp } = await lookup(urlObj.hostname);
+            if (!validateResolvedIP(resolvedIp)) {
+              throw new Error(`DNS resolution for ${urlObj.hostname} points to private/reserved IP: ${resolvedIp}`);
+            }
+          }
+        } catch (dnsErr: any) {
+          if (dnsErr.message?.includes('private/reserved IP')) throw dnsErr;
+          // DNS lookup failed - proceed with curl (it may also fail)
+        }
+
         try {
           const curlResult = await fetchWithCurl(urlConfig.url, timeout, urlConfig.headers, fingerprint.userAgent);
           if (curlResult.html && curlResult.html.length > 1000 && !isRedirectPage(curlResult.html)) {
@@ -1209,6 +1134,21 @@ export async function executeScan(
       // fingerprint which bypasses most JA3/JA4-based anti-bot systems.
       if (isFirstRedirect && PREFER_CURL_ON_FIRST_REDIRECT) {
         emitLog('info', `首次响应为重定向页面(可能为反爬虫)，直接使用curl获取: ${urlConfig.url}`);
+
+        // DNS rebinding check before curl fallback
+        try {
+          const urlObj = new URL(urlConfig.url);
+          if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(urlObj.hostname)) {
+            const { address: resolvedIp } = await lookup(urlObj.hostname);
+            if (!validateResolvedIP(resolvedIp)) {
+              throw new Error(`DNS resolution for ${urlObj.hostname} points to private/reserved IP: ${resolvedIp}`);
+            }
+          }
+        } catch (dnsErr: any) {
+          if (dnsErr.message?.includes('private/reserved IP')) throw dnsErr;
+          // DNS lookup failed - proceed with curl (it may also fail)
+        }
+
         try {
           const curlResult = await fetchWithCurl(urlConfig.url, timeout, urlConfig.headers, fingerprint.userAgent);
           if (curlResult.html && curlResult.html.length > 1000 && !isRedirectPage(curlResult.html)) {
@@ -1344,6 +1284,21 @@ export async function executeScan(
 
         // FALLBACK: Use curl to fetch the page
         // curl has a browser-like TLS fingerprint which bypasses JA3/JA4-based anti-bot
+
+        // DNS rebinding check before curl fallback
+        try {
+          const urlObj = new URL(urlConfig.url);
+          if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(urlObj.hostname)) {
+            const { address: resolvedIp } = await lookup(urlObj.hostname);
+            if (!validateResolvedIP(resolvedIp)) {
+              throw new Error(`DNS resolution for ${urlObj.hostname} points to private/reserved IP: ${resolvedIp}`);
+            }
+          }
+        } catch (dnsErr: any) {
+          if (dnsErr.message?.includes('private/reserved IP')) throw dnsErr;
+          // DNS lookup failed - proceed with curl (it may also fail)
+        }
+
         try {
           const curlResult = await fetchWithCurl(urlConfig.url, timeout, urlConfig.headers, fingerprint.userAgent);
           if (curlResult.html && curlResult.html.length > 1000 && !isRedirectPage(curlResult.html)) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSessionAuth } from '@/lib/api-auth';
 import { getConfig, getEffectiveProvider } from '@/lib/config';
+import { safeErrorResponse } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,9 +41,6 @@ export async function GET(request: NextRequest) {
       app: config.app,
     });
   } catch (err) {
-    return NextResponse.json(
-      { error: 'Failed to load config', details: (err as Error).message },
-      { status: 500 }
-    );
+    return safeErrorResponse(err, '加载配置失败');
   }
 }
