@@ -8,6 +8,7 @@ All notable changes to DarkLink Detector will be documented in this file.
 
 ### Added
 
+- **开源许可证** — 采用 GNU AGPL-3.0 开源许可证，允许使用和分发，修改版必须开源
 - **浏览器指纹池** — 新增 `BrowserFingerprint` 类型，包含 UA、Accept-Language、视口尺寸、平台、引擎类型，12 种真实指纹轮换
 - **扫描线程指纹分配** — 每个 URL 扫描任务分配独立指纹（`getNextFingerprint()`），同一 URL 的所有请求（主请求/curl/外部资源/浏览器渲染）保持一致，模拟单一浏览器会话
 - **资源请求指纹传递** — 新增 `getResourceHeaders()` 函数，外部资源（JS/CSS）请求使用与主页面一致的指纹
