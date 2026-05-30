@@ -1,0 +1,115 @@
+// MySQL Schema for DarkLink Detector
+// Use with: DATABASE_URL="mysql://..." npx prisma db push --schema=prisma/schema.mysql.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model ScanTask {
+  id            String       @id @default(cuid())
+  name          String       @default("未命名任务") @db.VarChar(100)
+  status        String       @default("pending") @db.VarChar(20)
+  totalUrls     Int          @default(0)
+  completedUrls Int          @default(0)
+  progress      Float        @default(0)
+  concurrency   Int          @default(10)
+  timeout       Int          @default(3000)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  results       ScanResult[]
+  logs          ScanLog[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ScanResult {
+  id              String     @id @default(cuid())
+  taskId          String
+  url             String     @db.Text
+  method          String     @default("GET") @db.VarChar(10)
+  statusCode      Int?
+  responseTime    Int?
+  title           String?    @db.VarChar(500)
+  extractedUrls   Int        @default(0)
+  darkLinks       Int        @default(0)
+  qrCodes         Int        @default(0)
+  status          String     @default("pending") @db.VarChar(20)
+  errorMessage    String?    @db.Text
+  rawHtml         String?    @db.MediumText
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  task            ScanTask   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  urlDetails      UrlDetail[]
+  darkLinkDetails DarkLink[]
+  qrCodeDetails   QrCodeResult[]
+
+  @@index([taskId])
+  @@index([status])
+}
+
+model UrlDetail {
+  id          String     @id @default(cuid())
+  resultId    String
+  url         String     @db.Text
+  tag         String?    @db.VarChar(20)
+  attribute   String?    @db.VarChar(20)
+  text        String?    @db.VarChar(500)
+  isExternal  Boolean    @default(false)
+  domain      String?    @db.VarChar(255)
+  isVisible   Boolean    @default(true)
+  hideReason  String?    @db.VarChar(200)
+  createdAt   DateTime   @default(now())
+  result      ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+
+  @@index([resultId])
+  @@index([domain])
+}
+
+model DarkLink {
+  id          String     @id @default(cuid())
+  resultId    String
+  url         String     @db.Text
+  tag         String?    @db.VarChar(20)
+  text        String?    @db.VarChar(500)
+  type        String     @db.VarChar(50)
+  severity    String     @default("medium") @db.VarChar(20)
+  description String?    @db.Text
+  evidence    String?    @db.Text
+  createdAt   DateTime   @default(now())
+  result      ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+
+  @@index([resultId])
+  @@index([severity])
+}
+
+model QrCodeResult {
+  id           String     @id @default(cuid())
+  resultId     String
+  sourceUrl    String?    @db.Text
+  decodedText  String     @db.Text
+  isSuspicious Boolean    @default(false)
+  reason       String?    @db.VarChar(500)
+  createdAt    DateTime   @default(now())
+  result       ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+
+  @@index([resultId])
+}
+
+model ScanLog {
+  id        String   @id @default(cuid())
+  taskId    String
+  level     String   @default("info") @db.VarChar(10)
+  message   String   @db.Text
+  detail    String?  @db.Text
+  createdAt DateTime @default(now())
+  task      ScanTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([level])
+}

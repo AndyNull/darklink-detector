@@ -1,0 +1,39 @@
+# 版本控制
+.git
+.gitignore
+
+# 依赖（构建时重新安装）
+node_modules
+mini-services/*/node_modules
+
+# 构建缓存
+.next
+
+# 运行时数据（通过 Volume 持久化）
+db/*.db
+db/*.db-journal
+config/auth.json
+config/sessions.json
+config/database.json
+
+# 开发文件
+dev.log
+*.log
+upload
+worklog.md
+agent-ctx
+.zscripts
+.z-ai-config
+.claude
+.claude*
+.next
+
+# Docker 文件自身
+Dockerfile
+docker-compose.yml
+docker-entrypoint.sh
+
+# 其他
+examples
+scripts
+src/app_backup

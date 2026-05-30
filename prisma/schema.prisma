@@ -1,0 +1,197 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model ScanTask {
+  id            String       @id @default(cuid())
+  name          String       @default("未命名任务")
+  status        String       @default("pending") // pending, running, paused, completed, stopped, error
+  totalUrls     Int          @default(0)
+  completedUrls Int          @default(0)
+  progress      Float        @default(0) // 0-100
+  concurrency   Int          @default(10)
+  timeout       Int          @default(10000) // ms
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  results       ScanResult[]
+  logs          ScanLog[]
+}
+
+model ScanResult {
+  id              String     @id @default(cuid())
+  taskId          String
+  url             String
+  method          String     @default("GET")
+  statusCode      Int?
+  responseTime    Int? // ms
+  title           String?
+  extractedUrls   Int        @default(0)
+  darkLinks       Int        @default(0)
+  qrCodes         Int        @default(0)
+  status          String     @default("pending") // pending, running, completed, error
+  errorMessage    String?
+  rawHtml         String? // store truncated HTML for reference
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  task            ScanTask   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  urlDetails      UrlDetail[]
+  darkLinkDetails DarkLink[]
+  qrCodeDetails   QrCodeResult[]
+}
+
+model UrlDetail {
+  id          String     @id @default(cuid())
+  resultId    String
+  url         String
+  tag         String? // a, img, script, link, iframe, area, source, embed, object, form
+  attribute   String? // href, src, action, etc.
+  text        String? // anchor text
+  isExternal  Boolean   @default(false)
+  domain      String?
+  isVisible   Boolean   @default(true) // based on CSS analysis
+  hideReason  String? // reason if not visible
+  createdAt   DateTime   @default(now())
+  result      ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+}
+
+model DarkLink {
+  id          String     @id @default(cuid())
+  resultId    String
+  url         String
+  tag         String?
+  text        String?
+  type        String // css_hidden, size_hidden, color_hidden, position_hidden, iframe_hidden, suspicious_domain, js_injected
+  severity    String     @default("medium") // low, medium, high, critical
+  description String?
+  evidence    String? // CSS rule, HTML snippet, etc.
+  createdAt   DateTime   @default(now())
+  result      ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+}
+
+model QrCodeResult {
+  id            String     @id @default(cuid())
+  resultId      String
+  sourceUrl     String? // the image URL where QR was found
+  decodedText   String // decoded QR content
+  isSuspicious  Boolean   @default(false)
+  reason        String?
+  qrImageBase64 String? // base64 encoded source image for QR code verification
+  createdAt     DateTime   @default(now())
+  result        ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+}
+
+model ScanLog {
+  id        String   @id @default(cuid())
+  taskId    String
+  level     String   @default("info") // info, warn, error, debug
+  message   String
+  detail    String?
+  createdAt DateTime @default(now())
+  task      ScanTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model MaliciousDomain {
+  id          String   @id @default(cuid())
+  domain      String   @unique
+  reason      String?  // why it's marked malicious
+  source      String   @default("manual") // manual, scan, threatbook, other
+  severity    String   @default("high") // low, medium, high, critical
+  category    String?  // phishing, malware, c2, spam, etc.
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model MaliciousIP {
+  id          String   @id @default(cuid())
+  ip          String   @unique
+  reason      String?
+  source      String   @default("manual") // manual, scan, threatbook, other
+  severity    String   @default("high") // low, medium, high, critical
+  category    String?  // phishing, malware, c2, spam, botnet, etc.
+  country     String?  // geo location
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model UpdateSchedule {
+  id          String    @id @default(cuid())
+  enabled     Boolean   @default(false)
+  frequency   String    @default("daily") // hourly, every-6h, every-12h, daily, weekly
+  lastRunAt   DateTime?
+  nextRunAt   DateTime?
+  status      String    @default("idle") // idle, running, completed, failed
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model ThreatIntelSource {
+  id            String    @id @default(cuid())
+  sourceId      String    @unique
+  name          String
+  nameEn        String?
+  description   String?
+  enabled       Boolean   @default(true)
+  requiresApiKey Boolean  @default(false)
+  apiKey        String?
+  status        String    @default("idle") // idle, collecting, completed, error
+  lastUpdate    DateTime?
+  entryCount    Int       @default(0)
+  error         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  entries       ThreatIntelEntry[]
+}
+
+model ThreatIntelEntry {
+  id        String   @id @default(cuid())
+  sourceId  String
+  type      String   // domain, ip
+  value     String
+  severity  String   @default("medium") // low, medium, high, critical
+  tags      String?
+  createdAt DateTime @default(now())
+  source    ThreatIntelSource @relation(fields: [sourceId], references: [sourceId], onDelete: Cascade)
+
+  @@index([type, value])
+  @@index([sourceId])
+  @@index([value])
+  @@unique([sourceId, type, value])
+}
+
+model ThreatIntelApiKey {
+  id            String    @id @default(cuid())
+  source        String    @unique
+  apiKey        String    // encrypted API key
+  apiUrl        String?
+  enabled       Boolean   @default(true)
+  lastValidated DateTime?
+  lastError     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model SyncTask {
+  id               String    @id @default(cuid())
+  name             String
+  sources          String    // JSON array of source IDs
+  status           String    @default("pending") // pending, running, paused, completed, failed, cancelled
+  progress         Float     @default(0) // 0-100
+  totalSources     Int       @default(0)
+  completedSources Int       @default(0)
+  failedSources    Int       @default(0)
+  results          String?   // JSON string of CollectorResult[]
+  message          String?   // Current progress description, e.g. "正在采集 openphish (2/8)..."
+  error            String?
+  createdAt        DateTime  @default(now())
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdBy        String?
+}

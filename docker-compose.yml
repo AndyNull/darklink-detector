@@ -1,0 +1,36 @@
+# ==============================================================================
+#  暗链检测系统 — Docker Compose 配置
+#  使用方式: docker compose up -d
+#
+#  只需暴露 3000 端口，扫描引擎(3003)和数据同步服务(3004)
+#  通过 Next.js rewrites 反向代理，无需对外暴露。
+# ==============================================================================
+
+services:
+  darklink:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: darklink-detector
+    restart: unless-stopped
+    ports:
+      - "3000:3000"   # Next.js 主应用（含代理到内部服务）
+    volumes:
+      # 持久化数据库和配置
+      - darklink-db:/app/db
+      - darklink-config:/app/config
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:./db/custom.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  darklink-db:
+    name: darklink-db
+  darklink-config:
+    name: darklink-config

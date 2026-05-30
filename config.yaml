@@ -1,0 +1,82 @@
+# DarkLink Detector Configuration
+# 数据库配置 - 选择使用的数据库类型: sqlite | mysql | postgresql
+
+database:
+  # 数据库类型: sqlite | mysql | postgresql
+  type: sqlite
+
+  # SQLite 配置 (type=sqlite时使用)
+  sqlite:
+    # 数据库文件路径 (相对于项目根目录)
+    path: "./db/custom.db"
+
+  # MySQL 配置 (type=mysql时使用)
+  mysql:
+    host: "localhost"
+    port: 3306
+    user: "root"
+    password: ""
+    database: "darklink_detector"
+    # 连接池大小
+    poolSize: 10
+
+  # PostgreSQL 配置 (type=postgresql时使用)
+  postgresql:
+    host: "localhost"
+    port: 5432
+    user: "postgres"
+    password: ""
+    database: "darklink_detector"
+    # 连接池大小
+    poolSize: 10
+    # SSL模式: disable | require | verify-ca | verify-full
+    ssl: disable
+
+# 扫描引擎配置
+scan:
+  # 默认并发数
+  defaultConcurrency: 10
+  # 默认超时(秒)
+  defaultTimeout: 3
+  # 最大外部JS文件分析数量
+  maxExternalJs: 15
+  # 最大外部CSS文件分析数量
+  maxExternalCss: 15
+  # 任务数据保留时间(小时)
+  taskRetentionHours: 24
+
+# 应用配置
+app:
+  # 应用标题
+  title: "DarkLink Detector"
+  # 版本号 (自动从 package.json 同步，请勿手动修改)
+  version: "1.5.0"
+  # 描述
+  description: "网页暗链检测工具"
+
+# 威胁情报API配置
+threatIntel:
+  # 是否启用威胁情报查询
+  enabled: true
+
+  # 微步在线 (ThreatBook) - https://x.threatbook.cn/
+  # 用于域名/IP威胁情报查询
+  threatbook:
+    enabled: false
+    apiKey: ""
+    # API基础地址
+    baseUrl: "https://api.threatbook.cn/v3"
+
+  # VirusTotal - https://www.virustotal.com/
+  # 用于域名/IP信誉查询
+  virustotal:
+    enabled: false
+    apiKey: ""
+
+  # URLhaus - https://urlhaus.abuse.ch/
+  # 用于恶意URL查询 (可能需要API Key)
+  urlhaus:
+    enabled: false
+    apiKey: ""
+    # API基础地址
+    baseUrl: "https://urlhaus-api.abuse.ch/v1"
