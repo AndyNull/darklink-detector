@@ -229,11 +229,31 @@ function extractJsRedirect(html: string): string | null {
   if (windowOpenMatch) return windowOpenMatch[1];
 
   // window.location = "url" or window.location.href = "url"
-  const locationMatch = html.match(/window\.location(?:\.href)?\s*=\s*["']([^"']+)["']/);
-  if (locationMatch) return locationMatch[1];
+  const windowLocationMatch = html.match(/window\.location(?:\.href)?\s*=\s*["']([^"']+)["']/);
+  if (windowLocationMatch) return windowLocationMatch[1];
 
-  // window.location.replace("url")
-  const replaceMatch = html.match(/window\.location\.replace\s*\(\s*["']([^"']+)["']\s*\)/);
+  // document.location = "url" or document.location.href = "url"
+  const documentLocationMatch = html.match(/document\.location(?:\.href)?\s*=\s*["']([^"']+)["']/);
+  if (documentLocationMatch) return documentLocationMatch[1];
+
+  // self.location = "url" or self.location.href = "url"
+  const selfLocationMatch = html.match(/\bself\.location(?:\.href)?\s*=\s*["']([^"']+)["']/);
+  if (selfLocationMatch) return selfLocationMatch[1];
+
+  // top.location = "url" or top.location.href = "url"
+  const topLocationMatch = html.match(/\btop\.location(?:\.href)?\s*=\s*["']([^"']+)["']/);
+  if (topLocationMatch) return topLocationMatch[1];
+
+  // parent.location = "url" or parent.location.href = "url"
+  const parentLocationMatch = html.match(/\bparent\.location(?:\.href)?\s*=\s*["']([^"']+)["']/);
+  if (parentLocationMatch) return parentLocationMatch[1];
+
+  // location.assign("url")
+  const assignMatch = html.match(/(?:window\.)?location\.assign\s*\(\s*["']([^"']+)["']\s*\)/);
+  if (assignMatch) return assignMatch[1];
+
+  // location.replace("url") (with or without window prefix)
+  const replaceMatch = html.match(/(?:window\.)?location\.replace\s*\(\s*["']([^"']+)["']\s*\)/);
   if (replaceMatch) return replaceMatch[1];
 
   // Meta refresh redirect
@@ -256,7 +276,12 @@ function isRedirectPage(html: string): boolean {
   const hasRedirectPattern = 
     (/window\.open\s*\(/.test(stripped) && /_self/.test(stripped)) ||
     /window\.location(?:\.href)?\s*=/.test(stripped) ||
-    /window\.location\.replace/.test(stripped);
+    /window\.location\.(?:replace|assign)/.test(stripped) ||
+    /document\.location(?:\.href)?\s*=/.test(stripped) ||
+    /\bself\.location(?:\.href)?\s*=/.test(stripped) ||
+    /\btop\.location(?:\.href)?\s*=/.test(stripped) ||
+    /\bparent\.location(?:\.href)?\s*=/.test(stripped) ||
+    /(?:window\.)?location\.(?:replace|assign)/.test(stripped);
   
   // If there's a redirect pattern but also substantial HTML content (long text, multiple tags),
   // it's probably a real page with some JS, not just a redirect page
@@ -547,6 +572,312 @@ function processExternalResults(
   return totalExtracted;
 }
 
+// ─── Result streaming helper: enforce limits and emit early ──────────────
+function trimResultArrays(result: ScanResultData): void {
+  if (result.urlDetails.length > MAX_URL_DETAILS) {
+    const overflow = result.urlDetails.length - MAX_URL_DETAILS;
+    result.urlDetails = result.urlDetails.slice(0, MAX_URL_DETAILS);
+    // Add an overflow indicator entry
+    result.urlDetails.push({
+      url: `[还有 ${overflow} 个URL详情未显示]`,
+      tag: 'overflow',
+      isExternal: false,
+      domain: undefined,
+      isVisible: true,
+      urlCount: overflow,
+      sources: ['overflow'],
+      tags: ['overflow'],
+    });
+  }
+  if (result.darkLinkDetails.length > MAX_DARK_LINK_DETAILS) {
+    const overflow = result.darkLinkDetails.length - MAX_DARK_LINK_DETAILS;
+    result.darkLinkDetails = result.darkLinkDetails.slice(0, MAX_DARK_LINK_DETAILS);
+    result.darkLinkDetails.push({
+      url: `[还有 ${overflow} 个暗链详情未显示]`,
+      tag: 'overflow',
+      type: 'malicious_keyword',
+      severity: 'low',
+      description: `检测结果过多，已截断显示。共 ${overflow} 个暗链详情未显示`,
+      evidence: `overflow_count=${overflow}`,
+    });
+  }
+}
+
+// ─── Shared post-fetch HTML analysis ────────────────────────────────────────
+// Extracted from the duplicated code in the normal path and curl fallback path.
+// Handles: HTML parsing, external resource fetching, domain dedup, image URL
+// collection, browser rendering, QR code detection, and memory trimming.
+async function analyzeHtmlResult(params: {
+  html: string;
+  baseUrl: string;
+  baseDomain: string | null;
+  result: ScanResultData;
+  timeout: number;
+  abortController: AbortController;
+  fingerprint: BrowserFingerprint;
+  disabledRules: string[];
+  emitLog: (level: LogEntry['level'], message: string, detail?: string) => void;
+  sourceUrl: string; // original URL being scanned (for logging & browser rendering)
+}): Promise<void> {
+  const { html, baseUrl, baseDomain, result, timeout, abortController, fingerprint, disabledRules, emitLog, sourceUrl } = params;
+
+  // Parse HTML
+  const parsed = parseHtml(html, baseUrl, disabledRules);
+  result.title = parsed.title;
+  result.urlDetails = parsed.urlDetails;
+  result.darkLinkDetails = parsed.darkLinkDetails;
+
+  emitLog('info', `HTML解析完成: ${sourceUrl}`, `提取 ${parsed.urlDetails.length} 个URL, 发现 ${parsed.darkLinkDetails.length} 个疑似暗链`);
+
+  // Compute adaptive parameters
+  const adaptive = getAdaptiveParams(result.responseTime || 0, timeout);
+
+  // Deep scan: External JS/CSS analysis - fetch ALL resources in parallel
+  const { jsUrls, cssUrls } = extractExternalResources(html, baseUrl);
+  emitLog('info', `发现外部资源: ${sourceUrl}`, `JS: ${jsUrls.length} 个, CSS: ${cssUrls.length} 个, 自适应超时: ${adaptive.externalTimeout}ms`);
+
+  const jsToFetch = jsUrls.slice(0, adaptive.maxExternalJs);
+  const cssToFetch = cssUrls.slice(0, adaptive.maxExternalCss);
+
+  // Combine all external resource URLs into a single parallel pool
+  const allResourceUrls: Array<{ url: string; type: 'js' | 'css' }> = [
+    ...jsToFetch.map(u => ({ url: u, type: 'js' as const })),
+    ...cssToFetch.map(u => ({ url: u, type: 'css' as const })),
+  ];
+
+  // Start image URL extraction concurrently with resource fetching
+  const hasExternalResources = allResourceUrls.length > 0;
+  const [resourceResults, imageExtractionResult] = await Promise.all([
+    hasExternalResources
+      ? fetchExternalResources(
+          allResourceUrls.map(r => r.url),
+          adaptive.externalTimeout,
+          abortController.signal,
+          EXTERNAL_FETCH_CONCURRENCY,
+          baseUrl,
+          fingerprint
+        )
+      : Promise.resolve([] as Array<{ url: string; text: string }>),
+    Promise.resolve(extractImageUrls(html, baseUrl)),
+  ]);
+
+  // Separate resource results by type (JS vs CSS)
+  const jsUrlSet = new Set(jsToFetch);
+  const jsResults = resourceResults.filter(r => jsUrlSet.has(r.url));
+  const cssResults = resourceResults.filter(r => !jsUrlSet.has(r.url));
+
+  // Process external JS files
+  if (jsResults.length > 0) {
+    emitLog('info', `成功获取 ${jsResults.length}/${jsToFetch.length} 个JS文件: ${sourceUrl}`);
+    const totalJsUrls = processExternalResults(jsResults, baseUrl, baseDomain, 'external-js', abortController.signal, result, extractUrlsFromJs, emitLog);
+    emitLog('info', `外部JS分析完成: ${sourceUrl}`, `共提取 ${totalJsUrls} 个URL (来自 ${jsResults.length} 个JS文件)`);
+  }
+
+  // Process external CSS files
+  if (cssResults.length > 0) {
+    emitLog('info', `成功获取 ${cssResults.length}/${cssToFetch.length} 个CSS文件: ${sourceUrl}`);
+    const totalCssUrls = processExternalResults(cssResults, baseUrl, baseDomain, 'external-css', abortController.signal, result, extractUrlsFromCss, emitLog);
+    emitLog('info', `外部CSS分析完成: ${sourceUrl}`, `共提取 ${totalCssUrls} 个URL (来自 ${cssResults.length} 个CSS文件)`);
+  }
+
+  // Cross-source domain dedup: merge urlDetails from HTML + external JS + external CSS
+  const finalDomainMap = new Map<string, UrlDetailData>();
+  const finalDarkLinks: DarkLinkData[] = [];
+  const darkLinkDedup = new Set<string>();
+
+  for (const detail of result.urlDetails) {
+    const domain = extractDedupKey(detail.url, detail.domain);
+    const existing = finalDomainMap.get(domain);
+    if (existing) {
+      existing.urlCount = (existing.urlCount || 1) + (detail.urlCount || 1);
+      if (detail.sources) {
+        const merged = new Set([...(existing.sources || []), ...detail.sources]);
+        existing.sources = [...merged];
+      }
+      if (detail.tags) {
+        const merged = new Set([...(existing.tags || []), ...detail.tags]);
+        existing.tags = [...merged];
+      }
+      if (detail.isVisible) existing.isVisible = true;
+    } else {
+      finalDomainMap.set(domain, { ...detail, domain });
+    }
+  }
+
+  for (const dl of result.darkLinkDetails) {
+    const dlDomain = extractDomain(dl.url);
+    const dedupKey = `${dlDomain}|${dl.type}`;
+    if (!darkLinkDedup.has(dedupKey)) {
+      darkLinkDedup.add(dedupKey);
+      finalDarkLinks.push(dl);
+    }
+  }
+
+  result.urlDetails = [...finalDomainMap.values()];
+  result.darkLinkDetails = filterSameDomainVisibilityDarkLinks(finalDarkLinks, baseDomain);
+  result.extractedUrls = result.urlDetails.reduce((sum, d) => sum + (d.urlCount || 1), 0);
+  result.darkLinks = result.darkLinkDetails.length;
+
+  emitLog('info', `深度扫描完成: ${sourceUrl}`, `总计 ${result.extractedUrls} 个URL, ${result.darkLinks} 个疑似暗链`);
+
+  // =====================================================
+  // Image URL Collection & QR Code Detection
+  // =====================================================
+
+  // Collect image URLs from HTML AND external JS/CSS files
+  const htmlImageUrls = imageExtractionResult;
+  const IMAGE_EXTENSIONS = /\.(jpg|jpeg|png|gif|webp|bmp|svg|ico|avif)(\?|$)/i;
+  const QR_IMAGE_PATTERNS = /\/(qr|qrcode|weixin|weibo|wechat|code|ewm|barcode|scan)/i;
+  const IMAGE_DIR_PATTERNS = /\/(image|img|photo|picture|pic|upload|static|assets|resource|media|content|data|files|cdn|qrcode|qr-code)/i;
+
+  // Extract image-like URLs from external JS/CSS resources
+  const externalImageUrls: string[] = [];
+  for (const { url: resUrl, text: resourceText } of resourceResults) {
+    const urls = extractUrlsFromJs(resourceText, baseUrl);
+    for (const u of urls) {
+      if (IMAGE_EXTENSIONS.test(u) || QR_IMAGE_PATTERNS.test(u) || IMAGE_DIR_PATTERNS.test(u)) {
+        if (!htmlImageUrls.includes(u) && !externalImageUrls.includes(u)) {
+          externalImageUrls.push(u);
+        }
+      }
+    }
+    // Also scan raw JS content for additional image URL patterns
+    const rawImgPatterns = [
+      /["'](data:image\/[^"']+)["']/gi,
+      /["']([^"']*(?:qr|qrcode|wechat|weixin|ewm|barcode|code|scan)[^']*\.(?:png|jpg|jpeg|gif|webp|svg))["']/gi,
+      /["']([^"']*(?:\/api\/qr|\/api\/qrcode|\/api\/code|\/generate[_-]?qr|\/create[_-]?qr)[^"']*)["']/gi,
+      /(?:src|href|url|image|img|icon|banner|poster)\s*[=:]\s*["']([^"']+\.(?:png|jpg|jpeg|gif|webp|svg))["']/gi,
+    ];
+    for (const pattern of rawImgPatterns) {
+      let m: RegExpExecArray | null;
+      while ((m = pattern.exec(resourceText)) !== null) {
+        const imgUrl = m[1];
+        if (imgUrl && !htmlImageUrls.includes(imgUrl) && !externalImageUrls.includes(imgUrl)) {
+          const resolved = imgUrl.startsWith('data:') ? imgUrl : (resolveUrl(imgUrl, baseUrl) || imgUrl);
+          if (!htmlImageUrls.includes(resolved) && !externalImageUrls.includes(resolved)) {
+            externalImageUrls.push(resolved);
+          }
+        }
+      }
+    }
+  }
+
+  // Scan inline scripts for dynamically loaded image patterns
+  const inlineScriptImages: string[] = [];
+  const inlineScriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+  let scriptMatch: RegExpExecArray | null;
+  while ((scriptMatch = inlineScriptRegex.exec(html)) !== null) {
+    const scriptContent = scriptMatch[1];
+    if (!scriptContent || scriptContent.length < 10) continue;
+    const scriptUrls = extractUrlsFromJs(scriptContent, baseUrl);
+    for (const u of scriptUrls) {
+      if ((IMAGE_EXTENSIONS.test(u) || QR_IMAGE_PATTERNS.test(u) || IMAGE_DIR_PATTERNS.test(u)) && !htmlImageUrls.includes(u) && !externalImageUrls.includes(u) && !inlineScriptImages.includes(u)) {
+        inlineScriptImages.push(u);
+      }
+    }
+  }
+
+  // Browser rendering for dynamic image detection
+  let browserImageUrls: string[] = [];
+  let browserDataUris: string[] = [];
+
+  const staticImageUrls = [...htmlImageUrls, ...externalImageUrls, ...inlineScriptImages];
+  const staticHasImages = staticImageUrls.some(u => !isDataUri(u));
+  const needsBrowserRender = !disabledRules.includes('qr_code') && !staticHasImages;
+
+  if (needsBrowserRender) {
+    emitLog('info', `静态分析未发现图片，启动浏览器渲染: ${sourceUrl}`);
+    try {
+      const browserResult = await renderPageForImages(
+        sourceUrl,
+        Math.min(timeout, 20000),
+        abortController.signal,
+        fingerprint
+      );
+
+      if (browserResult.success) {
+        browserImageUrls = browserResult.imageUrls || [];
+        browserDataUris = browserResult.dataUriImages || [];
+        emitLog('info', `浏览器渲染完成: ${sourceUrl}`,
+          `DOM图片: ${browserImageUrls.length}, data URI: ${browserDataUris.length}, 网络图片: ${browserResult.networkImages?.length || 0}`);
+
+        // If browser got a different (longer/more complete) HTML, use it for rawHtml
+        if (browserResult.html && browserResult.html.length > html.length * 1.2) {
+          result.rawHtml = browserResult.html.length > MAX_HTML_CACHE_SIZE
+            ? browserResult.html.substring(0, MAX_HTML_CACHE_SIZE) + `\n<!-- [TRUNCATED: original ${browserResult.html.length} bytes] -->`
+            : browserResult.html;
+        }
+      } else {
+        emitLog('warn', `浏览器渲染未成功: ${sourceUrl}`, browserResult.error || 'Unknown error');
+      }
+    } catch (err) {
+      emitLog('warn', `浏览器渲染失败: ${sourceUrl}`, (err as Error).message);
+    }
+  } else if (!disabledRules.includes('qr_code') && staticHasImages) {
+    emitLog('info', `静态分析已发现图片，跳过浏览器渲染: ${sourceUrl}`, `静态图片: ${staticImageUrls.length}`);
+  }
+
+  // Merge static + browser-rendered image URLs
+  const allSeenUrls = new Set(staticImageUrls);
+  const browserOnlyUrls: string[] = [];
+  for (const u of browserImageUrls) {
+    if (!allSeenUrls.has(u)) {
+      browserOnlyUrls.push(u);
+      allSeenUrls.add(u);
+    }
+  }
+  const allImageUrls = [...staticImageUrls, ...browserOnlyUrls];
+  const staticDataUris = staticImageUrls.filter(u => isDataUri(u));
+  const allDataUris = [...new Set([...staticDataUris, ...browserDataUris])];
+
+  emitLog('info', `发现 ${allImageUrls.length} 个图片URL (静态: ${staticImageUrls.length}, 浏览器新增: ${browserOnlyUrls.length}, data URI: ${allDataUris.length}): ${sourceUrl}`);
+
+  // QR code detection
+  if (!disabledRules.includes('qr_code') && allImageUrls.length > 0) {
+    const dataUris = allDataUris.length > 0 ? allDataUris : allImageUrls.filter(u => isDataUri(u));
+    const httpImageUrls = allImageUrls.filter(u => !isDataUri(u));
+
+    emitLog('info', `QR码检测: ${httpImageUrls.length} 个HTTP图片, ${dataUris.length} 个data URI: ${sourceUrl}`);
+
+    if (dataUris.length > 0) {
+      try {
+        const dataUriQrResults = await detectQrFromDataUris(dataUris);
+        result.qrCodeDetails.push(...dataUriQrResults);
+        if (dataUriQrResults.length > 0) {
+          emitLog('info', `data URI中发现 ${dataUriQrResults.length} 个QR码: ${sourceUrl}`, dataUriQrResults.map(q => q.decodedText).join(', '));
+        }
+      } catch (err) {
+        emitLog('warn', `data URI QR码检测失败: ${sourceUrl}`, String(err));
+      }
+    }
+
+    if (httpImageUrls.length > 0) {
+      try {
+        const qrResults = await detectQrCodesFromUrls(httpImageUrls, adaptive.externalTimeout, baseUrl);
+        result.qrCodeDetails.push(...qrResults);
+        if (qrResults.length > 0) {
+          emitLog('info', `HTTP图片中发现 ${qrResults.length} 个QR码: ${sourceUrl}`, qrResults.map(q => q.decodedText).join(', '));
+        }
+      } catch (err) {
+        emitLog('warn', `HTTP图片QR码检测失败: ${sourceUrl}`, String(err));
+      }
+    }
+
+    result.qrCodes = result.qrCodeDetails.length;
+    emitLog('info', `QR码检测完成: ${sourceUrl}`, `共发现 ${result.qrCodes} 个QR码`);
+  } else if (!disabledRules.includes('qr_code') && allImageUrls.length === 0) {
+    emitLog('info', `未发现图片URL，跳过QR码检测: ${sourceUrl}`);
+  }
+
+  // Apply memory limits before finalizing
+  trimResultArrays(result);
+
+  // Update rawHtml with the final HTML (may have changed due to JS redirects/curl fallbacks)
+  result.rawHtml = html.length > MAX_HTML_CACHE_SIZE
+    ? html.substring(0, MAX_HTML_CACHE_SIZE) + `\n<!-- [TRUNCATED: original ${html.length} bytes] -->`
+    : html;
+}
+
 // Main scan execution
 export async function executeScan(
   taskId: string,
@@ -648,36 +979,7 @@ export async function executeScan(
   const failedUrls: UrlConfig[] = [];
   let isRetryPhase = false;
 
-  // ─── Result streaming helper: enforce limits and emit early ──────────────
-  function trimResultArrays(result: ScanResultData): void {
-    if (result.urlDetails.length > MAX_URL_DETAILS) {
-      const overflow = result.urlDetails.length - MAX_URL_DETAILS;
-      result.urlDetails = result.urlDetails.slice(0, MAX_URL_DETAILS);
-      // Add an overflow indicator entry
-      result.urlDetails.push({
-        url: `[还有 ${overflow} 个URL详情未显示]`,
-        tag: 'overflow',
-        isExternal: false,
-        domain: undefined,
-        isVisible: true,
-        urlCount: overflow,
-        sources: ['overflow'],
-        tags: ['overflow'],
-      });
-    }
-    if (result.darkLinkDetails.length > MAX_DARK_LINK_DETAILS) {
-      const overflow = result.darkLinkDetails.length - MAX_DARK_LINK_DETAILS;
-      result.darkLinkDetails = result.darkLinkDetails.slice(0, MAX_DARK_LINK_DETAILS);
-      result.darkLinkDetails.push({
-        url: `[还有 ${overflow} 个暗链详情未显示]`,
-        tag: 'overflow',
-        type: 'malicious_keyword',
-        severity: 'low',
-        description: `检测结果过多，已截断显示。共 ${overflow} 个暗链详情未显示`,
-        evidence: `overflow_count=${overflow}`,
-      });
-    }
-  }
+
 
   emitLog('info', `开始扫描任务: ${taskId}`, `共 ${totalUrls} 个URL, 并发数: ${concurrency}, 超时: ${timeout}ms`);
   onProgress({
@@ -826,7 +1128,8 @@ export async function executeScan(
 
         const fallbackController = new AbortController();
         const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), timeout);
-        abortController.signal.addEventListener('abort', () => fallbackController.abort());
+        const onFallbackAbort = () => fallbackController.abort();
+        abortController.signal.addEventListener('abort', onFallbackAbort);
 
         try {
           response = await fetch(urlConfig.url, {
@@ -869,160 +1172,23 @@ export async function executeScan(
 
                 emitLog('info', `curl回退获取成功: ${urlConfig.url}`, `HTML长度: ${curlResult.html.length}`);
 
-                // Skip the normal response processing and go straight to HTML parsing
-                // by jumping to the parseHtml section with the curl result
+                // Use shared analysis helper (includes HTML parsing, external resources,
+                // domain dedup, QR detection, trimResultArrays, and rawHtml)
                 const baseUrl = finalUrl !== urlConfig.url ? finalUrl : urlConfig.url;
                 const baseDomain = extractDomain(baseUrl);
-                const html = curlResult.html;
 
-                // Store raw HTML for source code preview (truncate to 200KB)
-                result.rawHtml = html.length > MAX_HTML_CACHE_SIZE
-                  ? html.substring(0, MAX_HTML_CACHE_SIZE) + `\n<!-- [TRUNCATED: original ${html.length} bytes] -->`
-                  : html;
-
-                // Parse HTML
-                const parsed = parseHtml(html, baseUrl, disabledRules);
-                result.title = parsed.title;
-                result.urlDetails = parsed.urlDetails;
-                result.darkLinkDetails = parsed.darkLinkDetails;
-
-                emitLog('info', `HTML解析完成(curl): ${urlConfig.url}`, `提取 ${parsed.urlDetails.length} 个URL, 发现 ${parsed.darkLinkDetails.length} 个疑似暗链`);
-
-                // Compute adaptive parameters
-                const adaptive = getAdaptiveParams(result.responseTime, timeout);
-
-                // Deep scan: External JS/CSS analysis - fetch ALL resources in parallel
-                const { jsUrls, cssUrls } = extractExternalResources(html, baseUrl);
-                emitLog('info', `发现外部资源(curl): ${urlConfig.url}`, `JS: ${jsUrls.length} 个, CSS: ${cssUrls.length} 个`);
-
-                const jsToFetch = jsUrls.slice(0, adaptive.maxExternalJs);
-                const cssToFetch = cssUrls.slice(0, adaptive.maxExternalCss);
-
-                // Combine all external resource URLs and fetch in a single parallel pool
-                const allResourceUrls: Array<{ url: string; type: 'js' | 'css' }> = [
-                  ...jsToFetch.map(u => ({ url: u, type: 'js' as const })),
-                  ...cssToFetch.map(u => ({ url: u, type: 'css' as const })),
-                ];
-
-                // Start image URL extraction concurrently with resource fetching
-                const [resourceResults, imageExtractionResult] = await Promise.all([
-                  allResourceUrls.length > 0
-                    ? fetchExternalResources(
-                        allResourceUrls.map(r => r.url),
-                        adaptive.externalTimeout,
-                        abortController.signal,
-                        EXTERNAL_FETCH_CONCURRENCY,
-                        baseUrl,
-                        fingerprint
-                      )
-                    : Promise.resolve([]),
-                  Promise.resolve(extractImageUrls(html, baseUrl)),
-                ]);
-
-                // Separate results by type
-                const jsUrlSet = new Set(jsToFetch);
-                const jsResults = resourceResults.filter(r => jsUrlSet.has(r.url));
-                const cssResults = resourceResults.filter(r => !jsUrlSet.has(r.url));
-
-                // Process JS results
-                if (jsResults.length > 0) {
-                  const totalJsUrls = processExternalResults(jsResults, baseUrl, baseDomain, 'external-js', abortController.signal, result, extractUrlsFromJs, emitLog);
-                  emitLog('info', `外部JS分析完成(curl): ${urlConfig.url}`, `共提取 ${totalJsUrls} 个URL (来自 ${jsResults.length} 个JS文件)`);
-                }
-
-                // Process CSS results
-                if (cssResults.length > 0) {
-                  const totalCssUrls = processExternalResults(cssResults, baseUrl, baseDomain, 'external-css', abortController.signal, result, extractUrlsFromCss, emitLog);
-                  emitLog('info', `外部CSS分析完成(curl): ${urlConfig.url}`, `共提取 ${totalCssUrls} 个URL (来自 ${cssResults.length} 个CSS文件)`);
-                }
-
-                // Domain dedup
-                const finalDomainMap = new Map<string, UrlDetailData>();
-                const finalDarkLinks: DarkLinkData[] = [];
-                const darkLinkDedup = new Set<string>();
-                for (const detail of result.urlDetails) {
-                  const dKey = extractDedupKey(detail.url, detail.domain);
-                  const existing = finalDomainMap.get(dKey);
-                  if (existing) {
-                    existing.urlCount = (existing.urlCount || 1) + (detail.urlCount || 1);
-                    if (detail.sources) { const merged = new Set([...(existing.sources || []), ...detail.sources]); existing.sources = [...merged]; }
-                    if (detail.tags) { const merged = new Set([...(existing.tags || []), ...detail.tags]); existing.tags = [...merged]; }
-                    if (detail.isVisible) existing.isVisible = true;
-                  } else {
-                    finalDomainMap.set(dKey, { ...detail, domain: dKey });
-                  }
-                }
-                for (const dl of result.darkLinkDetails) {
-                  const dlDomain = extractDomain(dl.url);
-                  const dedupKey = `${dlDomain}|${dl.type}`;
-                  if (!darkLinkDedup.has(dedupKey)) { darkLinkDedup.add(dedupKey); finalDarkLinks.push(dl); }
-                }
-                result.urlDetails = [...finalDomainMap.values()];
-                result.darkLinkDetails = filterSameDomainVisibilityDarkLinks(finalDarkLinks, baseDomain);
-                result.extractedUrls = result.urlDetails.reduce((sum, d) => sum + (d.urlCount || 1), 0);
-                result.darkLinks = result.darkLinkDetails.length;
-
-                // QR code detection (using image URLs from HTML + external resources)
-                const htmlImageUrls = imageExtractionResult;
-                const IMAGE_EXTENSIONS = /\.(jpg|jpeg|png|gif|webp|bmp|svg|ico|avif)(\?|$)/i;
-                const QR_IMAGE_PATTERNS = /\/(qr|qrcode|weixin|weibo|wechat|code|ewm|barcode|scan)/i;
-                const externalImageUrls: string[] = [];
-                for (const { text: resourceText } of resourceResults) {
-                  const urls = extractUrlsFromJs(resourceText, baseUrl);
-                  for (const u of urls) {
-                    if (IMAGE_EXTENSIONS.test(u) || QR_IMAGE_PATTERNS.test(u)) {
-                      if (!htmlImageUrls.includes(u) && !externalImageUrls.includes(u)) {
-                        externalImageUrls.push(u);
-                      }
-                    }
-                  }
-                }
-                const allImageUrls = [...htmlImageUrls, ...externalImageUrls];
-                
-                // Also try browser rendering for dynamic image detection (curl path)
-                if (!disabledRules.includes('qr_code')) {
-                  try {
-                    const browserResult = await renderPageForImages(
-                      urlConfig.url,
-                      Math.min(timeout, 20000),
-                      abortController.signal,
-                      fingerprint
-                    );
-                    if (browserResult.success && browserResult.imageUrls) {
-                      const seenSet = new Set(allImageUrls);
-                      for (const u of browserResult.imageUrls) {
-                        if (!seenSet.has(u)) {
-                          allImageUrls.push(u);
-                          seenSet.add(u);
-                        }
-                      }
-                      // Also add data URIs from browser
-                      if (browserResult.dataUriImages) {
-                        for (const du of browserResult.dataUriImages) {
-                          if (!allImageUrls.includes(du)) allImageUrls.push(du);
-                        }
-                      }
-                    }
-                  } catch {}
-                }
-                
-                if (!disabledRules.includes('qr_code') && allImageUrls.length > 0) {
-                  const dataUris = allImageUrls.filter(u => isDataUri(u));
-                  const httpImageUrls = allImageUrls.filter(u => !isDataUri(u));
-                  if (dataUris.length > 0) {
-                    try {
-                      const dataUriQrResults = await detectQrFromDataUris(dataUris);
-                      result.qrCodeDetails.push(...dataUriQrResults);
-                    } catch {}
-                  }
-                  if (httpImageUrls.length > 0) {
-                    try {
-                      const qrResults = await detectQrCodesFromUrls(httpImageUrls, adaptive.externalTimeout, baseUrl);
-                      result.qrCodeDetails.push(...qrResults);
-                    } catch {}
-                  }
-                  result.qrCodes = result.qrCodeDetails.length;
-                }
+                await analyzeHtmlResult({
+                  html: curlResult.html,
+                  baseUrl,
+                  baseDomain,
+                  result,
+                  timeout,
+                  abortController,
+                  fingerprint,
+                  disabledRules,
+                  emitLog,
+                  sourceUrl: urlConfig.url,
+                });
 
                 result.status = 'completed';
                 emitProgress(urlConfig.url);
@@ -1040,6 +1206,7 @@ export async function executeScan(
         } finally {
           clearTimeout(fallbackTimeoutId);
           abortController.signal.removeEventListener('abort', onTaskAbort);
+          abortController.signal.removeEventListener('abort', onFallbackAbort);
         }
       }
 
@@ -1315,317 +1482,34 @@ export async function executeScan(
         }
       }
 
-      // Parse HTML - use finalUrl as the base URL for resolving relative links
+      // Parse HTML & deep scan - use shared analysis helper
+      // This handles: HTML parsing, external resource fetching, domain dedup,
+      // image URL collection, browser rendering, QR code detection, memory trimming,
+      // and rawHtml storage.
       const baseUrl = finalUrl !== urlConfig.url ? finalUrl : urlConfig.url;
       const baseDomain = extractDomain(baseUrl);
-      emitLog('debug', `解析HTML: ${urlConfig.url}`, `HTML长度: ${html.length}, 最终URL: ${baseUrl}`);
-      const parsed = parseHtml(html, baseUrl, disabledRules);
 
-      result.title = parsed.title;
-      result.urlDetails = parsed.urlDetails;
-      result.darkLinkDetails = parsed.darkLinkDetails;
-
-      emitLog('info', `HTML解析完成: ${urlConfig.url}`, `提取 ${parsed.urlDetails.length} 个URL, 发现 ${parsed.darkLinkDetails.length} 个疑似暗链`);
-
-      // =====================================================
-      // DEEP SCAN: External JS/CSS Analysis
-      // OPTIMIZED: Fetch ALL external resources (JS + CSS) in parallel
-      // =====================================================
-
-      // Compute adaptive parameters based on page response time
-      const adaptive = getAdaptiveParams(result.responseTime || (Date.now() - startTime), timeout);
-
-      const { jsUrls, cssUrls } = extractExternalResources(html, baseUrl);
-      emitLog('info', `发现外部资源: ${urlConfig.url}`, `JS: ${jsUrls.length} 个, CSS: ${cssUrls.length} 个, 自适应超时: ${adaptive.externalTimeout}ms`);
-
-      const jsToFetch = jsUrls.slice(0, adaptive.maxExternalJs);
-      const cssToFetch = cssUrls.slice(0, adaptive.maxExternalCss);
-
-      // Combine all external resource URLs into a single parallel pool
-      const allResourceUrls: Array<{ url: string; type: 'js' | 'css' }> = [
-        ...jsToFetch.map(u => ({ url: u, type: 'js' as const })),
-        ...cssToFetch.map(u => ({ url: u, type: 'css' as const })),
-      ];
-
-      // OPTIMIZATION: Start image URL extraction WHILE external resources are being fetched
-      // This overlaps I/O-bound (network fetch) with CPU-bound (image URL extraction) work
-      const hasExternalResources = allResourceUrls.length > 0;
-      const [resourceResults, imageExtractionResult] = await Promise.all([
-        hasExternalResources
-          ? fetchExternalResources(
-              allResourceUrls.map(r => r.url),
-              adaptive.externalTimeout,
-              abortController.signal,
-              EXTERNAL_FETCH_CONCURRENCY,
-              baseUrl,
-              fingerprint
-            )
-          : Promise.resolve([] as Array<{ url: string; text: string }>),
-        Promise.resolve(extractImageUrls(html, baseUrl)),
-      ]);
-
-      // Separate resource results by type (JS vs CSS)
-      const jsUrlSet = new Set(jsToFetch);
-      const jsResults = resourceResults.filter(r => jsUrlSet.has(r.url));
-      const cssResults = resourceResults.filter(r => !jsUrlSet.has(r.url));
-
-      // --- Process external JS files ---
-      if (jsResults.length > 0) {
-        emitLog('info', `成功获取 ${jsResults.length}/${jsToFetch.length} 个JS文件: ${urlConfig.url}`);
-
-        const totalJsUrls = processExternalResults(jsResults, baseUrl, baseDomain, 'external-js', abortController.signal, result, extractUrlsFromJs, emitLog);
-
-        emitLog('info', `外部JS分析完成: ${urlConfig.url}`, `共提取 ${totalJsUrls} 个URL (来自 ${jsResults.length} 个JS文件)`);
-      }
-
-      // --- Process external CSS files ---
-      if (cssResults.length > 0) {
-        emitLog('info', `成功获取 ${cssResults.length}/${cssToFetch.length} 个CSS文件: ${urlConfig.url}`);
-
-        const totalCssUrls = processExternalResults(cssResults, baseUrl, baseDomain, 'external-css', abortController.signal, result, extractUrlsFromCss, emitLog);
-
-        emitLog('info', `外部CSS分析完成: ${urlConfig.url}`, `共提取 ${totalCssUrls} 个URL (来自 ${cssResults.length} 个CSS文件)`);
-      }
-
-      // Update counts after deep scan
-      // Cross-source domain dedup: merge urlDetails from HTML + external JS + external CSS
-      const finalDomainMap = new Map<string, UrlDetailData>();
-      const allUrlDetails: UrlDetailData[] = result.urlDetails;
-      const finalDarkLinks: DarkLinkData[] = [];
-      const darkLinkDedup = new Set<string>();
-
-      for (const detail of allUrlDetails) {
-        const domain = extractDedupKey(detail.url, detail.domain);
-        const existing = finalDomainMap.get(domain);
-        if (existing) {
-          // Merge: accumulate URL count and sources
-          existing.urlCount = (existing.urlCount || 1) + (detail.urlCount || 1);
-          if (detail.sources) {
-            const merged = new Set([...(existing.sources || []), ...detail.sources]);
-            existing.sources = [...merged];
-          }
-          if (detail.tags) {
-            const merged = new Set([...(existing.tags || []), ...detail.tags]);
-            existing.tags = [...merged];
-          }
-          // If any URL is visible, the domain is visible
-          if (detail.isVisible) existing.isVisible = true;
-        } else {
-          finalDomainMap.set(domain, { ...detail, domain });
-        }
-      }
-
-      // Also dedup dark links by domain+type
-      for (const dl of result.darkLinkDetails) {
-        const dlDomain = extractDomain(dl.url);
-        const dedupKey = `${dlDomain}|${dl.type}`;
-        if (!darkLinkDedup.has(dedupKey)) {
-          darkLinkDedup.add(dedupKey);
-          finalDarkLinks.push(dl);
-        }
-      }
-
-      result.urlDetails = [...finalDomainMap.values()];
-      result.darkLinkDetails = filterSameDomainVisibilityDarkLinks(finalDarkLinks, baseDomain);
-      result.extractedUrls = result.urlDetails.reduce((sum, d) => sum + (d.urlCount || 1), 0);
-      result.darkLinks = result.darkLinkDetails.length;
-
-      emitLog('info', `深度扫描完成: ${urlConfig.url}`, `总计 ${result.extractedUrls} 个URL, ${result.darkLinks} 个疑似暗链`);
-
-      // =====================================================
-      // ENHANCED: Image URL Collection & QR Code Detection
-      // OPTIMIZED: Using image URLs already extracted during resource fetch
-      // =====================================================
-
-      // Collect image URLs from BOTH the HTML AND external JS/CSS files
-      // JS/CSS files may contain image URLs (e.g., QR code images) that aren't in the HTML
-      const htmlImageUrls = imageExtractionResult;
-
-      // Extract image-like URLs from external JS/CSS resources
-      const IMAGE_EXTENSIONS = /\.(jpg|jpeg|png|gif|webp|bmp|svg|ico|avif)(\?|$)/i;
-      // Extended patterns for QR-code and WeChat-related image paths
-      const QR_IMAGE_PATTERNS = /\/(qr|qrcode|weixin|weibo|wechat|code|ewm|barcode|scan)/i;
-      // Common image/QR hosting directory patterns
-      const IMAGE_DIR_PATTERNS = /\/(image|img|photo|picture|pic|upload|static|assets|resource|media|content|data|files|cdn|qrcode|qr-code)/i;
-      const externalImageUrls: string[] = [];
-      for (const { url: resUrl, text: resourceText } of resourceResults) {
-        // Use the same URL extraction but filter for image URLs
-        const urls = extractUrlsFromJs(resourceText, baseUrl);
-        for (const u of urls) {
-          if (IMAGE_EXTENSIONS.test(u) || QR_IMAGE_PATTERNS.test(u) || IMAGE_DIR_PATTERNS.test(u)) {
-            if (!htmlImageUrls.includes(u) && !externalImageUrls.includes(u)) {
-              externalImageUrls.push(u);
-            }
-          }
-        }
-        // Also scan raw JS content for additional image URL patterns not caught by extractUrlsFromJs
-        // This catches dynamically constructed image paths, base64 data URIs, etc.
-        const rawImgPatterns = [
-          // Data URI images in JS
-          /["'](data:image\/[^"']+)["']/gi,
-          // Relative paths with QR/image keywords
-          /["']([^"']*(?:qr|qrcode|wechat|weixin|ewm|barcode|code|scan)[^"']*\.(?:png|jpg|jpeg|gif|webp|svg))["']/gi,
-          // Common QR code hosting paths
-          /["']([^"']*(?:\/api\/qr|\/api\/qrcode|\/api\/code|\/generate[_-]?qr|\/create[_-]?qr)[^"']*)["']/gi,
-          // Image URLs in variable assignments
-          /(?:src|href|url|image|img|icon|banner|poster)\s*[=:]\s*["']([^"']+\.(?:png|jpg|jpeg|gif|webp|svg))["']/gi,
-        ];
-        for (const pattern of rawImgPatterns) {
-          let m: RegExpExecArray | null;
-          while ((m = pattern.exec(resourceText)) !== null) {
-            const imgUrl = m[1];
-            if (imgUrl && !htmlImageUrls.includes(imgUrl) && !externalImageUrls.includes(imgUrl)) {
-              // Resolve relative URLs
-              const resolved = imgUrl.startsWith('data:') ? imgUrl : (resolveUrl(imgUrl, baseUrl) || imgUrl);
-              if (!htmlImageUrls.includes(resolved) && !externalImageUrls.includes(resolved)) {
-                externalImageUrls.push(resolved);
-              }
-            }
-          }
-        }
-      }
-
-      // Also scan inline scripts for dynamically loaded image patterns
-      // that may not be caught by the cheerio-based extraction
-      const inlineScriptImages: string[] = [];
-      const inlineScriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
-      let scriptMatch: RegExpExecArray | null;
-      while ((scriptMatch = inlineScriptRegex.exec(html)) !== null) {
-        const scriptContent = scriptMatch[1];
-        if (!scriptContent || scriptContent.length < 10) continue;
-        const scriptUrls = extractUrlsFromJs(scriptContent, baseUrl);
-        for (const u of scriptUrls) {
-          if ((IMAGE_EXTENSIONS.test(u) || QR_IMAGE_PATTERNS.test(u) || IMAGE_DIR_PATTERNS.test(u)) && !htmlImageUrls.includes(u) && !externalImageUrls.includes(u) && !inlineScriptImages.includes(u)) {
-            inlineScriptImages.push(u);
-          }
-        }
-      }
-
-      // =====================================================
-      // ENHANCED: Browser Rendering for Dynamic Image Detection
-      // Use Playwright headless browser to fully render the page
-      // and capture ALL images, including those loaded by JavaScript.
-      // This is CRITICAL for detecting QR codes that are only
-      // visible after JS execution.
-      //
-      // OPTIMIZATION: Only launch browser when static analysis
-      // found NO images. If static analysis already found images,
-      // we can detect QR codes from those — no need for the
-      // expensive browser render. This saves ~3-5s per URL.
-      // =====================================================
-      let browserImageUrls: string[] = [];
-      let browserDataUris: string[] = [];
-
-      const staticImageUrls = [...htmlImageUrls, ...externalImageUrls, ...inlineScriptImages];
-      const staticHasImages = staticImageUrls.some(u => !isDataUri(u));
-      const needsBrowserRender = !disabledRules.includes('qr_code') && !staticHasImages;
-
-      if (needsBrowserRender) {
-        emitLog('info', `静态分析未发现图片，启动浏览器渲染: ${urlConfig.url}`);
-        try {
-          const browserResult = await renderPageForImages(
-            urlConfig.url,
-            Math.min(timeout, 20000), // Cap browser timeout at 20s
-            abortController.signal,
-            fingerprint
-          );
-
-          if (browserResult.success) {
-            browserImageUrls = browserResult.imageUrls || [];
-            browserDataUris = browserResult.dataUriImages || [];
-            emitLog('info', `浏览器渲染完成: ${urlConfig.url}`, 
-              `DOM图片: ${browserImageUrls.length}, data URI: ${browserDataUris.length}, 网络图片: ${browserResult.networkImages?.length || 0}`);
-
-            // If browser got a different (longer/more complete) HTML, use it for rawHtml
-            if (browserResult.html && browserResult.html.length > html.length * 1.2) {
-              result.rawHtml = browserResult.html.length > MAX_HTML_CACHE_SIZE
-                ? browserResult.html.substring(0, MAX_HTML_CACHE_SIZE) + `\n<!-- [TRUNCATED: original ${browserResult.html.length} bytes] -->`
-                : browserResult.html;
-            }
-          } else {
-            emitLog('warn', `浏览器渲染未成功: ${urlConfig.url}`, browserResult.error || 'Unknown error');
-          }
-        } catch (err) {
-          emitLog('warn', `浏览器渲染失败: ${urlConfig.url}`, (err as Error).message);
-        }
-      } else if (!disabledRules.includes('qr_code') && staticHasImages) {
-        emitLog('info', `静态分析已发现图片，跳过浏览器渲染: ${urlConfig.url}`, `静态图片: ${staticImageUrls.length}`);
-      }
-
-      // Merge static + browser-rendered image URLs
-      const allSeenUrls = new Set(staticImageUrls);
-      const browserOnlyUrls: string[] = [];
-      for (const u of browserImageUrls) {
-        if (!allSeenUrls.has(u)) {
-          browserOnlyUrls.push(u);
-          allSeenUrls.add(u);
-        }
-      }
-      const allImageUrls = [...staticImageUrls, ...browserOnlyUrls];
-      // Merge data URIs too
-      const staticDataUris = staticImageUrls.filter(u => isDataUri(u));
-      const allDataUris = [...new Set([...staticDataUris, ...browserDataUris])];
-
-      emitLog('info', `发现 ${allImageUrls.length} 个图片URL (静态: ${staticImageUrls.length}, 浏览器新增: ${browserOnlyUrls.length}, data URI: ${allDataUris.length}): ${urlConfig.url}`);
-
-      if (!disabledRules.includes('qr_code') && allImageUrls.length > 0) {
-        // Separate data: URIs from HTTP URLs for optimized QR detection
-        const dataUris = allDataUris.length > 0 ? allDataUris : allImageUrls.filter(u => isDataUri(u));
-        const httpImageUrls = allImageUrls.filter(u => !isDataUri(u));
-
-        emitLog('info', `QR码检测: ${httpImageUrls.length} 个HTTP图片, ${dataUris.length} 个data URI: ${urlConfig.url}`);
-
-        // Detect QR codes from data: URI images directly (no HTTP fetch needed, fast)
-        if (dataUris.length > 0) {
-          try {
-            const dataUriQrResults = await detectQrFromDataUris(dataUris);
-            result.qrCodeDetails.push(...dataUriQrResults);
-            if (dataUriQrResults.length > 0) {
-              emitLog('info', `data URI中发现 ${dataUriQrResults.length} 个QR码: ${urlConfig.url}`, dataUriQrResults.map(q => q.decodedText).join(', '));
-            }
-          } catch (err) {
-            emitLog('warn', `data URI QR码检测失败: ${urlConfig.url}`, String(err));
-          }
-        }
-
-        // Detect QR codes from HTTP image URLs (pass ALL, not limited to 20)
-        // CRITICAL: Pass the page URL as Referer so images can be downloaded
-        if (httpImageUrls.length > 0) {
-          try {
-            const qrResults = await detectQrCodesFromUrls(httpImageUrls, adaptive.externalTimeout, baseUrl);
-            result.qrCodeDetails.push(...qrResults);
-            if (qrResults.length > 0) {
-              emitLog('info', `HTTP图片中发现 ${qrResults.length} 个QR码: ${urlConfig.url}`, qrResults.map(q => q.decodedText).join(', '));
-            }
-          } catch (err) {
-            emitLog('warn', `HTTP图片QR码检测失败: ${urlConfig.url}`, String(err));
-          }
-        }
-
-        result.qrCodes = result.qrCodeDetails.length;
-        emitLog('info', `QR码检测完成: ${urlConfig.url}`, `共发现 ${result.qrCodes} 个QR码`);
-      } else if (!disabledRules.includes('qr_code') && allImageUrls.length === 0) {
-        emitLog('info', `未发现图片URL，跳过QR码检测: ${urlConfig.url}`);
-      }
-
-      // Apply memory limits before finalizing
-      trimResultArrays(result);
-
-      // Update rawHtml with the final HTML (may have changed due to JS redirects/curl fallbacks)
-      result.rawHtml = html.length > MAX_HTML_CACHE_SIZE
-        ? html.substring(0, MAX_HTML_CACHE_SIZE) + `\n<!-- [TRUNCATED: original ${html.length} bytes] -->`
-        : html;
+      await analyzeHtmlResult({
+        html,
+        baseUrl,
+        baseDomain,
+        result,
+        timeout,
+        abortController,
+        fingerprint,
+        disabledRules,
+        emitLog,
+        sourceUrl: urlConfig.url,
+      });
 
       result.status = 'completed';
 
       // Summary log with source breakdown
-      const htmlUrls = parsed.urlDetails.length;
       const jsUrlCount = result.urlDetails.filter(u => u.tag === 'external-js').length;
       const cssUrlCount = result.urlDetails.filter(u => u.tag === 'external-css').length;
       emitLog('info', `扫描完成: ${urlConfig.url}`, [
         `耗时: ${result.responseTime}ms`,
         `JS重定向: ${jsRedirectAttempts}次`,
-        `HTML URL: ${htmlUrls}`,
         `JS URL: ${jsUrlCount}`,
         `CSS URL: ${cssUrlCount}`,
         `总计URL: ${result.extractedUrls}`,
@@ -1710,6 +1594,7 @@ export async function executeScan(
       completedUrls,
       progress: finalStatus === 'completed' ? 100 : Math.round((completedUrls / totalUrls) * 100),
       status: finalStatus,
+      completedAt: Date.now(),
     });
 
     emitLog('info', `扫描任务${finalStatus === 'completed' ? '完成' : '已停止'}: ${taskId}`);

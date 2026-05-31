@@ -195,6 +195,15 @@ model ThreatIntelApiKey {
   updatedAt     DateTime  @updatedAt
 }
 
+model ThreatIntelConfig {
+  id                  String    @id @default("default")
+  autoUpdateEnabled   Boolean   @default(false)
+  updateIntervalHours Int       @default(24)
+  lastUpdateAt        DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}
+
 model SyncTask {
   id               String    @id @default(cuid())
   name             String

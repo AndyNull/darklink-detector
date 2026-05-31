@@ -110,6 +110,8 @@ export interface ScanProgress {
   estimatedTimeRemaining?: number;
   /** Number of dark links found so far */
   darkLinksFound?: number;
+  /** Timestamp (Date.now()) when the task reached a terminal state (completed/stopped) */
+  completedAt?: number;
 }
 
 export type TaskStatus = 'pending' | 'running' | 'paused' | 'completed' | 'stopped' | 'error';

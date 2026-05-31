@@ -7,6 +7,7 @@
  */
 
 import type { ChildProcess } from 'child_process';
+import path from 'path';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,7 +45,7 @@ export const SERVICE_CONFIGS: Record<ServiceName, ServiceConfig> = {
     name: 'scan-engine',
     label: '扫描引擎',
     port: 3003,
-    directory: '/home/z/my-project/mini-services/scan-engine',
+    directory: path.join(process.cwd(), 'mini-services/scan-engine'),
     command: 'bun',
     args: ['index.ts'],
     healthUrl: 'http://localhost:3003/health',
@@ -53,7 +54,7 @@ export const SERVICE_CONFIGS: Record<ServiceName, ServiceConfig> = {
     name: 'data-sync-service',
     label: '数据同步服务',
     port: 3004,
-    directory: '/home/z/my-project/mini-services/data-sync-service',
+    directory: path.join(process.cwd(), 'mini-services/data-sync-service'),
     command: 'bun',
     args: ['index.ts'],
     healthUrl: 'http://localhost:3004/health',

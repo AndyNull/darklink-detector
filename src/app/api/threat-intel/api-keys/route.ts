@@ -181,18 +181,39 @@ const SOURCES_META: Record<
     docUrl: 'https://www.phishtank.com/api_info.php',
     validateMethod: async (apiKey: string) => {
       try {
-        // PhishTank API validation - check if key works
-        const resp = await fetch('https://data.phishtank.com/data/online-valid.json', {
-          method: 'GET',
+        // PhishTank's API does not have a dedicated key-validation endpoint.
+        // We test the key by calling the check-url API with a known-safe URL.
+        // If the key is valid, the API responds with a result (even if the URL
+        // is not phishing). If the key is invalid, the API returns an error.
+        const resp = await fetch('https://checkurl.phishtank.com/checkurl/', {
+          method: 'POST',
           headers: {
-            'Accept': 'application/json',
+            'Content-Type': 'application/json',
           },
+          body: JSON.stringify({
+            url: 'https://google.com',
+            app_key: apiKey,
+            format: 'json',
+          }),
           signal: AbortSignal.timeout(15000),
         });
-        // PhishTank public data doesn't require API key for basic access
-        // The key is mainly needed for the check-url API
+
         if (resp.ok) {
+          const json = await resp.json();
+          // PhishTank returns meta.status on valid responses
+          if (json.meta?.status === 'success' || json.results?.valid !== undefined) {
+            return { valid: true };
+          }
+          // If the response indicates an invalid app_key, report it
+          if (json.meta?.error) {
+            return { valid: false, error: json.meta.error || 'API Key验证失败' };
+          }
+          // Ambiguous response — key might be valid but the URL check returned something unexpected
           return { valid: true };
+        }
+
+        if (resp.status === 401 || resp.status === 403) {
+          return { valid: false, error: `API Key无效 (HTTP ${resp.status})` };
         }
         return { valid: false, error: `HTTP ${resp.status}` };
       } catch (err: any) {

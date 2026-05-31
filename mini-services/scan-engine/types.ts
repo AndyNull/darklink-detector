@@ -102,6 +102,8 @@ export interface ScanProgress {
   progress: number;
   status: TaskStatus;
   currentUrl?: string;
+  /** Timestamp (epoch ms) when the scan reached a terminal state (completed/stopped) */
+  completedAt?: number;
 }
 
 export type TaskStatus = 'pending' | 'running' | 'paused' | 'completed' | 'stopped' | 'error';

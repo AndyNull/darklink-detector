@@ -149,8 +149,8 @@ const CHEAP_TLDS = [
   'buzz', 'icu', 'monster', 'cam', 'cyou', 'rest', 'bar', 'bond', 'cfd', 'sbs',
   // Additional cheap/abusable TLDs
   'fun', 'host', 'press', 'website', 'space', 'tech', 'store',
-  'work', 'law', 'beer', 'fit', 'yoga', 'run', 'pub', 'wiki', 'design',
-  'live', 'studio', 'red', 'pro', 'app', 'dev', 'ai',
+  'work', 'law', 'beer', 'fit', 'yoga', 'run', 'pub', 'wiki',
+  'red',
   'surf', 'skin', 'hair', 'beauty', 'mom', 'dad', 'lol', 'gay',
   'quest', 'place', 'world', 'zone', 'cool', 'ninja', 'rocks',
   'help', 'how', 'guide', 'directory', 'services', 'solutions',

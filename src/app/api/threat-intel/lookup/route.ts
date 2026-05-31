@@ -324,9 +324,18 @@ async function lookupAbuseIPDB(
     const totalReports = data.totalReports || 0;
     const isWhitelisted = data.isWhitelisted || false;
 
-    const isMalicious = abuseScore >= 50 && !isWhitelisted;
-    const isSuspicious = abuseScore >= 10 && !isWhitelisted;
-    const severity = abuseScore >= 75 ? 'critical' : abuseScore >= 50 ? 'high' : abuseScore >= 10 ? 'medium' : 'low';
+    // Whitelisted IPs are known-good — override severity to 'low' regardless of abuse score
+    const isMalicious = !isWhitelisted && abuseScore >= 50;
+    const isSuspicious = !isWhitelisted && abuseScore >= 10;
+    const severity = isWhitelisted
+      ? 'low'
+      : abuseScore >= 75
+        ? 'critical'
+        : abuseScore >= 50
+          ? 'high'
+          : abuseScore >= 10
+            ? 'medium'
+            : 'low';
 
     const tags: string[] = [];
     if (data.usageType) tags.push(`usage:${data.usageType}`);
