@@ -136,7 +136,7 @@ export function DataSyncSection() {
 
   // Request refresh when data is stale
   useEffect(() => {
-    if (wsConnected && dataSync.isStale('threat-intel')) {
+    if (wsConnected && dataSync.isStale('threatIntelSources')) {
       dataSync.requestRefresh('threat-intel');
     }
     if (wsConnected && dataSync.isStale('schedule')) {

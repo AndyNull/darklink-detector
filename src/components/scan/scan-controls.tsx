@@ -83,7 +83,12 @@ export function CompactScanControls({ onReset }: { onReset?: () => void }) {
         const sublinkAbort = new AbortController();
         sublinkAbortRef.current = sublinkAbort;
 
-        const initialSourcesProgress = enabledUrls.map(u => ({
+        const initialSourcesProgress: Array<{
+          url: string;
+          hostname: string;
+          sublinkCount: number;
+          status: 'pending' | 'discovering' | 'done' | 'error';
+        }> = enabledUrls.map(u => ({
           url: u.url,
           hostname: '',
           sublinkCount: 0,

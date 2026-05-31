@@ -26,6 +26,15 @@ echo -e "${CYAN}${BOLD}║         暗链检测系统  ·  一键启动         
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════╝${NC}"
 echo ""
 
+# ─── Step 0: Ensure .env file exists ─────────────────────────────────────────
+ENV_FILE="$PROJECT_ROOT/.env"
+if [ ! -f "$ENV_FILE" ]; then
+  echo -e "${YELLOW}${BOLD}[准备]${NC} ${BOLD}创建 .env 文件...${NC}"
+  cp "$PROJECT_ROOT/.env.example" "$ENV_FILE"
+  echo -e "${GREEN}  ✓ 已从 .env.example 创建 .env (默认使用 SQLite)${NC}"
+  echo ""
+fi
+
 # ─── Step 1: Install main project dependencies ───────────────────────────────
 echo -e "${BLUE}${BOLD}[1/6]${NC} ${BOLD}安装主项目依赖...${NC}"
 cd "$PROJECT_ROOT"

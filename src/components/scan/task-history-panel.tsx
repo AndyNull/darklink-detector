@@ -87,7 +87,8 @@ export function TaskHistoryPanel({ compact = false, onViewResults, onViewLogs, e
     setLoadingLogs(true);
     try {
       const data = await getScanResults(taskId);
-      const logs: LogEntry[] = (data.logs || []).map((l: ApiLogEntry) => ({
+      const logs: LogEntry[] = (data.logs || []).map((l: ApiLogEntry, i: number) => ({
+        id: i,
         level: l.level || 'info',
         message: l.message,
         detail: l.detail,

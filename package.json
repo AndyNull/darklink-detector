@@ -11,7 +11,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
-    "setup": "bun install && cd mini-services/scan-engine && bun install && cd ../data-sync-service && bun install && cd ../.. && bun run db:push",
+    "setup": "test -f .env || cp .env.example .env && bun install && cd mini-services/scan-engine && bun install && cd ../data-sync-service && bun install && cd ../.. && bun run db:push",
     "start:all": "bash start.sh"
   },
   "dependencies": {

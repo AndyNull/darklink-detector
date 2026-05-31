@@ -1476,7 +1476,7 @@ async function runCollection(
         } catch (err: any) {
           console.error(`Collector ${id} threw unhandled error: ${err.message}`);
           await updateSourceHealth(id, 'error', 0, err.message);
-          return { sourceId: id, domains: 0, ips: 0, error: err.message };
+          return { sourceId: id, domains: 0, ips: 0, entries: 0, error: err.message };
         }
       }),
     );
@@ -1493,6 +1493,7 @@ async function runCollection(
           sourceId: `unknown-${completedCount}`,
           domains: 0,
           ips: 0,
+          entries: 0,
           error: settled.reason?.message || 'Unknown error',
         };
         results.push(errorResult);

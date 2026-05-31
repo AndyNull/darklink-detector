@@ -101,7 +101,7 @@ const DEFAULT_CONFIG: AppConfigFile = {
   },
   app: {
     title: 'DarkLink Detector',
-    version: '1.5.0',
+    version: '1.10.0',
     description: '网页暗链检测工具',
   },
   threatIntel: {
@@ -187,7 +187,7 @@ function parseValue(value: string): any {
 }
 
 function deepMerge<T extends Record<string, any>>(target: T, source: Record<string, any>): T {
-  const result = { ...target };
+  const result: Record<string, any> = { ...target };
   for (const key of Object.keys(source)) {
     if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
       result[key] = deepMerge(result[key] || {}, source[key]);
@@ -195,7 +195,7 @@ function deepMerge<T extends Record<string, any>>(target: T, source: Record<stri
       result[key] = source[key];
     }
   }
-  return result;
+  return result as T;
 }
 
 export function loadConfig(): AppConfigFile {

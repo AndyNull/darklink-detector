@@ -955,7 +955,7 @@ export function MaliciousLibrary() {
 
   // Request refresh for malicious-stats when stale
   useEffect(() => {
-    if (wsConnected && dataSync.isStale('malicious-stats')) {
+    if (wsConnected && dataSync.isStale('maliciousStats')) {
       dataSync.requestRefresh('malicious-stats');
     }
   }, [wsConnected, dataSync]);
@@ -1463,6 +1463,11 @@ function ThreatIntelSourcesTab({ domainTotal, ipTotal, onRefresh }: {
   ipTotal: number;
   onRefresh: () => void;
 }) {
+  const dataSync = useDataSyncStore();
+  const { maliciousStats, connected: wsConnected } = dataSync;
+  const wsTotalCount = wsConnected && (maliciousStats.domainCount > 0 || maliciousStats.ipCount > 0)
+    ? maliciousStats.domainCount + maliciousStats.ipCount
+    : 0;
   const [allSources, setAllSources] = useState<SourceInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);

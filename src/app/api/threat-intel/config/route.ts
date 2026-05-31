@@ -10,13 +10,13 @@ export async function GET(request: NextRequest) {
   if (authError) return authError;
 
   try {
-    let config = await db.threatIntelConfig.findUnique({
+    let config = await (db as any).threatIntelConfig.findUnique({
       where: { id: 'default' },
     });
 
     // Create default config if not exists
     if (!config) {
-      config = await db.threatIntelConfig.create({
+      config = await (db as any).threatIntelConfig.create({
         data: { id: 'default' },
       });
     }
@@ -80,7 +80,7 @@ export async function PUT(request: NextRequest) {
       updateData.updateIntervalHours = interval;
     }
 
-    const config = await db.threatIntelConfig.upsert({
+    const config = await (db as any).threatIntelConfig.upsert({
       where: { id: 'default' },
       update: updateData,
       create: {

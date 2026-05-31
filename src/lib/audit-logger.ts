@@ -253,7 +253,7 @@ export async function getLogCategories(): Promise<Array<{ category: string; size
   await ensureLogsDir();
 
   const categories: LogCategory[] = ['auth', 'task', 'system', 'data'];
-  const result = [];
+  const result: Array<{ category: string; size: number; exists: boolean }> = [];
 
   for (const cat of categories) {
     const logFile = join(LOGS_DIR, `${cat}.log`);

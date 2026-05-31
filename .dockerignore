@@ -26,14 +26,17 @@ agent-ctx
 .z-ai-config
 .claude
 .claude*
-.next
 
-# Docker 文件自身
+# Docker 文件自身（不需要在镜像内）
 Dockerfile
 docker-compose.yml
-docker-entrypoint.sh
 
 # 其他
 examples
 scripts
+skills
 src/app_backup
+download
+*.tar.gz
+.env*
+!.env.example

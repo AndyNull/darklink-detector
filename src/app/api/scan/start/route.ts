@@ -83,8 +83,9 @@ export async function POST(request: NextRequest) {
 
     // Also try waitUntil for Next.js 14.1+
     try {
-      if (typeof request.waitUntil === 'function') {
-        request.waitUntil(scanPromise);
+      const reqAny = request as unknown as Record<string, unknown>;
+      if (typeof reqAny.waitUntil === 'function') {
+        (reqAny.waitUntil as (promise: Promise<unknown>) => void)(scanPromise);
       }
     } catch {}
 

@@ -123,7 +123,7 @@ async function cacheResult(
   sourceLookupId: string,
   type: string,
   value: string,
-  data: LookupResult['data']
+  data: NonNullable<LookupResult['data']>
 ): Promise<void> {
   try {
     await db.threatIntelEntry.upsert({

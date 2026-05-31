@@ -253,7 +253,7 @@ export async function GET(request: NextRequest) {
         validateMethod: undefined,
         keyConfigured: !!record,
         keyEnabled: record?.enabled ?? false,
-        keyStatus: getKeyStatus(record),
+        keyStatus: getKeyStatus(record ?? null),
         lastValidated: record?.lastValidated?.toISOString() || null,
         lastError: record?.lastError || null,
       };

@@ -229,7 +229,7 @@ export async function fetchWithRedirectControl(
   while (redirectCount < maxRedirects) {
     // Build headers with accumulated cookies
     const requestHeaders: Record<string, string> = {
-      ...fetchOpts.headers,
+      ...(fetchOpts.headers as Record<string, string>),
       // Update Referer for redirects
       ...(redirectCount > 0 ? { Referer: currentUrl } : {}),
     };

@@ -102,6 +102,14 @@ export interface ScanProgress {
   progress: number;
   status: TaskStatus;
   currentUrl?: string;
+  /** Timestamp when the current URL started processing */
+  currentUrlStartTime?: number;
+  /** Average time per URL in ms (based on completed URLs) */
+  avgTimePerUrl?: number;
+  /** Estimated time remaining in ms */
+  estimatedTimeRemaining?: number;
+  /** Number of dark links found so far */
+  darkLinksFound?: number;
 }
 
 export type TaskStatus = 'pending' | 'running' | 'paused' | 'completed' | 'stopped' | 'error';

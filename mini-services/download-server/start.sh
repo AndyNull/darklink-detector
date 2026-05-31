@@ -6,7 +6,7 @@ PORT=3006
 DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 
 # Read version from package.json
-ARCHIVE_NAME="darklink-detector-$(node -p "require('$DIR/package.json').version").tar.gz"
+ARCHIVE_NAME="darklink-detector-$(bun -e "console.log(require('$DIR/package.json').version)").tar.gz"
 
 # Check if already running
 if lsof -i :$PORT >/dev/null 2>&1; then

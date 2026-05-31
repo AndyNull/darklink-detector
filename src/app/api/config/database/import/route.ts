@@ -396,7 +396,7 @@ export async function POST(request: NextRequest) {
         try {
           const record = item as Record<string, unknown>;
           const sanitized = sanitizeThreatIntelRecord(record);
-          await (db as Record<string, unknown>).threatIntelEntry.upsert({
+          await (db as any).threatIntelEntry.upsert({
             where: { id: sanitized.id as string },
             update: {},
             create: sanitized,

@@ -1007,7 +1007,7 @@ async function storeEntries(sourceId: string, domains: string[], ips: string[]) 
     const domainResults = await parallelWithLimit(
       domainBatches.map((batch) => async () => {
         try {
-          const result = await db.threatIntelEntry.createMany({
+          const result = await (db as any).threatIntelEntry.createMany({
             data: batch.map((domain) => ({
               sourceId,
               type: 'domain',
@@ -1041,7 +1041,7 @@ async function storeEntries(sourceId: string, domains: string[], ips: string[]) 
     const ipResults = await parallelWithLimit(
       ipBatches.map((batch) => async () => {
         try {
-          const result = await db.threatIntelEntry.createMany({
+          const result = await (db as any).threatIntelEntry.createMany({
             data: batch.map((ip) => ({
               sourceId,
               type: 'ip',

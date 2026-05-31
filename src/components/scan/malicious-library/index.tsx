@@ -195,11 +195,11 @@ export function MaliciousLibrary() {
       const total = data.total || 0;
 
       if (isDomain) {
-        setDomainEntries(items);
+        setDomainEntries(items as MaliciousDomain[]);
         setDomainTotal(total);
         setDomainPage(page);
       } else {
-        setIpEntries(items);
+        setIpEntries(items as MaliciousIP[]);
         setIpTotal(total);
         setIpPage(page);
       }
@@ -421,7 +421,7 @@ export function MaliciousLibrary() {
               placeholder="搜索..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') { fetchEntries(activeTab, search); } }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && activeTab !== 'sources') { fetchEntries(activeTab, search); } }}
               className="h-7 w-full text-[11px] pl-6"
             />
           </div>
@@ -430,7 +430,7 @@ export function MaliciousLibrary() {
             variant="outline"
             size="sm"
             className="h-7 text-[11px] gap-1 px-1.5 shrink-0"
-            onClick={() => fetchEntries(activeTab, search)}
+            onClick={() => activeTab !== 'sources' && fetchEntries(activeTab as 'domain' | 'ip', search)}
           >
             <Search className="h-3 w-3" />
             {!isAuthenticated && '搜索'}

@@ -43,7 +43,7 @@ export function ThreatIntelSourcesTab({ domainTotal, ipTotal, onRefresh }: {
     setLoading(true);
     try {
       const data = await fetchThreatIntelSources(forceRefresh);
-      setAllSources(data.sources || []);
+      setAllSources((data.sources || []) as SourceInfo[]);
       setApiSummary(data.summary || null);
     } catch (err) {
       console.error('Failed to fetch threat intel sources:', err);

@@ -103,8 +103,13 @@ interface DataSyncStore {
   refreshMaliciousStats: () => Promise<void>;
   refreshAll: () => Promise<void>;
 
+  // Connection state
+  connected: boolean;
+
   // Helpers
   hasActiveTasks: () => boolean;
+  isStale: (key: keyof DataSyncStore['lastUpdated']) => boolean;
+  requestRefresh: (key: string) => void;
 
   // Internal
   _pollTimer: ReturnType<typeof setInterval> | null;
@@ -142,6 +147,9 @@ export const useDataSyncStore = create<DataSyncStore>((set, get) => ({
 
   // Init
   initialized: false,
+
+  // Connection state (REST polling is always "connected")
+  connected: true,
 
   // Internal
   _pollTimer: null,
@@ -305,6 +313,25 @@ export const useDataSyncStore = create<DataSyncStore>((set, get) => ({
 
   hasActiveTasks: () => {
     return get().syncTasks.some(t => t.status === 'running' || t.status === 'pending');
+  },
+
+  isStale: (key: keyof DataSyncStore['lastUpdated']) => {
+    const last = get().lastUpdated[key];
+    if (!last) return true;
+    const staleMs = key === 'syncTasks' ? 10_000 : 120_000;
+    return Date.now() - last > staleMs;
+  },
+
+  requestRefresh: (key: string) => {
+    const refreshMap: Record<string, () => Promise<void>> = {
+      syncTasks: get().refreshSyncTasks,
+      threatIntelSources: get().refreshSources,
+      schedule: get().refreshSchedule,
+      maliciousStats: get().refreshMaliciousStats,
+      'malicious-stats': get().refreshMaliciousStats,
+    };
+    const fn = refreshMap[key];
+    if (fn) fn();
   },
 
   // ─── Polling ────────────────────────────────────────────────────────────────

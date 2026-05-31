@@ -518,7 +518,7 @@ function AppSidebar({ activePage, setActivePage }: { activePage: ActivePage; set
         {/* Sync progress button — only visible when authenticated (settings page requires login) */}
         {isAuthenticated && hasActiveSync && (
           <button
-            onClick={() => setActivePageSafe('settings')}
+            onClick={() => setActivePage('settings')}
             className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-[12px] font-medium text-primary/70 hover:text-primary hover:bg-primary/5 transition-colors"
             title="查看同步进度"
           >

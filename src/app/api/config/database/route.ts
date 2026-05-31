@@ -42,7 +42,7 @@ export async function PUT(request: NextRequest) {
     }
 
     // Validate input
-    const validation = validateDatabaseConfigInput(config as Record<string, unknown>);
+    const validation = validateDatabaseConfigInput(config as unknown as Record<string, unknown>);
     if (!validation.valid) {
       return NextResponse.json({ error: validation.errors[0] }, { status: 400 });
     }

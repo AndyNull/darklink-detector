@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTaskResults } from '@/lib/scan-engine/task-store';
-import { requireSessionAuth } from '@/lib/auth-server';
+import { requireSessionAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 

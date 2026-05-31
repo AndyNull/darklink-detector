@@ -57,6 +57,8 @@ RUN mkdir -p /app/db /app/config && \
     chown -R appuser:appgroup /app/db /app/config
 
 # ── 复制 Next.js standalone 产物 ──
+# 注意: standalone 输出包含 mini-services 源码但不含 node_modules,
+# 下面的 mini-services COPY 会覆盖此目录并附带完整依赖
 COPY --from=builder --chown=appuser:appgroup /app/.next/standalone ./
 COPY --from=builder --chown=appuser:appgroup /app/.next/static ./.next/static
 COPY --from=builder --chown=appuser:appgroup /app/public ./public
@@ -67,7 +69,9 @@ COPY --from=builder --chown=appuser:appgroup /app/node_modules/.prisma ./node_mo
 COPY --from=builder --chown=appuser:appgroup /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder --chown=appuser:appgroup /app/node_modules/prisma ./node_modules/prisma
 
-# ── 复制 mini-services（完整源码 + 依赖）──
+# ── 复制 mini-services（完整源码 + node_modules）──
+# ⚠️ 此步骤会覆盖 standalone 中的 mini-services 目录（不含依赖），
+# 必须在 standalone COPY 之后执行，且不能删除此步骤
 COPY --from=builder --chown=appuser:appgroup /app/mini-services ./mini-services
 
 # ── 复制配置和启动脚本 ──

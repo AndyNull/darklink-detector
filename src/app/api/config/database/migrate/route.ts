@@ -563,7 +563,7 @@ export async function POST(request: NextRequest) {
     // Try to export ThreatIntelEntry if it exists
     let threatIntelEntries: unknown[] = [];
     try {
-      threatIntelEntries = await (db as Record<string, unknown>).threatIntelEntry.findMany() as unknown[];
+      threatIntelEntries = await (db as any).threatIntelEntry.findMany() as unknown[];
     } catch {
       // ThreatIntelEntry model may not exist, skip it
     }
@@ -571,7 +571,7 @@ export async function POST(request: NextRequest) {
     // Try to export ThreatIntelSource if it exists
     let threatIntelSources: unknown[] = [];
     try {
-      threatIntelSources = await (db as Record<string, unknown>).threatIntelSource.findMany() as unknown[];
+      threatIntelSources = await (db as any).threatIntelSource.findMany() as unknown[];
     } catch {
       // ThreatIntelSource model may not exist, skip it
     }
@@ -579,7 +579,7 @@ export async function POST(request: NextRequest) {
     // Try to export ThreatIntelApiKey if it exists
     let threatIntelApiKeys: unknown[] = [];
     try {
-      threatIntelApiKeys = await (db as Record<string, unknown>).threatIntelApiKey.findMany() as unknown[];
+      threatIntelApiKeys = await (db as any).threatIntelApiKey.findMany() as unknown[];
     } catch {
       // ThreatIntelApiKey model may not exist, skip it
     }
@@ -587,7 +587,7 @@ export async function POST(request: NextRequest) {
     // Try to export SyncTask if it exists
     let syncTasks: unknown[] = [];
     try {
-      syncTasks = await (db as Record<string, unknown>).syncTask.findMany() as unknown[];
+      syncTasks = await (db as any).syncTask.findMany() as unknown[];
     } catch {
       // SyncTask model may not exist, skip it
     }

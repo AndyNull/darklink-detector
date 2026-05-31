@@ -137,7 +137,7 @@ darklink-detector/
 git clone <repository-url>
 cd darklink-detector
 
-# 一键启动（自动安装依赖 → 初始化数据库 → 启动所有服务）
+# 一键启动（自动创建 .env → 安装依赖 → 初始化数据库 → 启动所有服务）
 bash start.sh
 ```
 
@@ -150,30 +150,35 @@ bash start.sh
 
 `start.sh` 脚本执行流程：
 
-1. **安装依赖** — 主项目及各 mini-service 的 `bun install`
-2. **初始化数据库** — 执行 `bun run db:push` 推送 Schema
-3. **启动微服务** — 后台启动扫描引擎（3003）、数据同步服务（3004）、下载服务（3006）
-4. **启动主应用** — 启动 Next.js 开发服务器（3000）
+1. **创建配置** — 如 `.env` 不存在，自动从 `.env.example` 复制（默认 SQLite）
+2. **安装依赖** — 主项目及各 mini-service 的 `bun install`
+3. **初始化数据库** — 执行 `bun run db:push` 推送 Schema
+4. **创建管理员** — 如 `config/auth.json` 不存在，自动创建默认管理员账户
+5. **启动微服务** — 后台启动扫描引擎（3003）、数据同步服务（3004）
+6. **启动主应用** — 启动 Next.js 开发服务器（3000）
 
 ### 手动分步启动
 
 ```bash
-# 1. 安装依赖
+# 1. 创建环境配置（首次运行）
+cp .env.example .env
+# 默认使用 SQLite，如需 MySQL/PostgreSQL 请编辑 .env
+
+# 2. 安装依赖
 bun install
 cd mini-services/scan-engine && bun install && cd ../..
 cd mini-services/data-sync-service && bun install && cd ../..
-cd mini-services/download-server && bun install && cd ../..
 
-# 2. 初始化数据库
+# 3. 初始化数据库
 bun run db:push
 
-# 3. 启动扫描引擎（终端 1）
+# 4. 启动扫描引擎（终端 1）
 cd mini-services/scan-engine && bun --hot index.ts
 
-# 4. 启动数据同步服务（终端 2）
+# 5. 启动数据同步服务（终端 2）
 cd mini-services/data-sync-service && bun --hot index.ts
 
-# 5. 启动主应用（终端 3）
+# 6. 启动主应用（终端 3）
 bun run dev
 ```
 

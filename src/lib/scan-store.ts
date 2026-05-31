@@ -181,7 +181,7 @@ interface ScanStore {
   setSublinkEnabled: (enabled: boolean) => void;
   setSublinkDepth: (depth: number) => void;
   setSublinkStatus: (status: SublinkStatus) => void;
-  setSublinkProgress: (progress: SublinkProgress | null) => void;
+  setSublinkProgress: (progress: SublinkProgress | null | ((prev: SublinkProgress | null) => SublinkProgress | null)) => void;
   resetSublinkScan: () => void;
 
   // Task history
@@ -407,7 +407,13 @@ export const useScanStore = create<ScanStore>((set, get) => ({
   setSublinkEnabled: (enabled) => set({ sublinkEnabled: enabled }),
   setSublinkDepth: (depth) => set({ sublinkDepth: depth }),
   setSublinkStatus: (status) => set({ sublinkStatus: status }),
-  setSublinkProgress: (progress) => set({ sublinkProgress: progress }),
+  setSublinkProgress: (progress) => {
+    if (typeof progress === 'function') {
+      set({ sublinkProgress: progress(get().sublinkProgress) });
+    } else {
+      set({ sublinkProgress: progress });
+    }
+  },
   resetSublinkScan: () => set({
     sublinkStatus: 'idle',
     sublinkProgress: null,
