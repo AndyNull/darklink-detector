@@ -688,3 +688,24 @@ Synchronize the `ScanProgress` interface between `src/lib/scan-engine/types.ts` 
 - ESLint passes for modified files (no new lint errors)
 - Dev server is running successfully
 - Types are now synchronized between main and mini-services versions
+
+---
+Task ID: 10
+Agent: Main Agent
+Task: Verify all fixes with build, then push to GitHub
+
+Work Log:
+- Verified `bun run build` succeeds with all changes
+- Verified `bun run lint` - no new lint errors introduced (pre-existing 35 errors unrelated to changes)
+- Tested health endpoint: returns `{"status":"ok","database":"ok","services":{"scanEngine":"ok","dataSync":"ok"}}`
+- Tested /api/scan/html endpoint: returns 404 "未找到扫描结果" (no auth required, consistent with other scan GET endpoints)
+- All changes committed: `feat: DNS cache, keyword precision, health endpoint, Docker Playwright, scan/html public access (v1.11.0)`
+- Pushed to GitHub: commit 386184c (c8ae242..386184c)
+- Cleaned GitHub token from remote URL
+
+Stage Summary:
+- Build: SUCCESS
+- Lint: No new errors
+- API Tests: Health endpoint + scan/html endpoint working correctly
+- GitHub Push: SUCCESS (commit 386184c)
+- All 6 optimization tasks completed and verified
