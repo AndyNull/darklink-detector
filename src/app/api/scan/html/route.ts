@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTaskResults } from '@/lib/scan-engine/task-store';
-import { requireSessionAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,11 +8,11 @@ export const dynamic = 'force-dynamic';
  * The main /api/scan?action=results endpoint strips rawHtml by default
  * to reduce network payload. This endpoint fetches it on demand when
  * the user clicks "View Source" in the UI.
+ *
+ * NOTE: This endpoint is publicly accessible (same as /api/scan GET endpoints).
+ * Viewing scan results does not require authentication.
  */
 export async function GET(request: NextRequest) {
-  const authError = await requireSessionAuth(request);
-  if (authError) return authError;
-
   const url = new URL(request.url);
   const taskId = url.searchParams.get('taskId');
   const resultUrl = url.searchParams.get('url');

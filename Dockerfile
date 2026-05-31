@@ -13,6 +13,11 @@ COPY package.json ./
 COPY mini-services/scan-engine/package.json ./mini-services/scan-engine/
 COPY mini-services/data-sync-service/package.json ./mini-services/data-sync-service/
 
+# 复制 lockfile 确保可复现构建
+COPY bun.lock ./
+COPY mini-services/scan-engine/bun.lock ./mini-services/scan-engine/
+COPY mini-services/data-sync-service/bun.lock ./mini-services/data-sync-service/
+
 # 安装主项目依赖（含 prisma CLI，构建时需要）
 RUN bun install
 
@@ -42,6 +47,9 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl sqlite3 && \
     rm -rf /var/lib/apt/lists/*
+
+# Install Playwright Chromium for browser rendering (dark link detection)
+RUN bunx playwright install --with-deps chromium
 
 # 环境变量
 ENV NODE_ENV=production

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { db } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,10 +23,43 @@ export async function GET() {
   const store = getStore();
   const activeTasks = store?.activeScanPromises.size ?? 0;
 
+  // Check database connectivity
+  let dbStatus = 'ok';
+  try {
+    await db.$queryRaw`SELECT 1`;
+  } catch {
+    dbStatus = 'error';
+  }
+
+  // Check mini-services (non-blocking, short timeout)
+  let scanEngine = 'unknown';
+  let dataSync = 'unknown';
+  try {
+    const scanRes = await fetch('http://localhost:3003/health', { signal: AbortSignal.timeout(2000) });
+    if (scanRes.ok) scanEngine = 'ok';
+    else scanEngine = 'degraded';
+  } catch {
+    scanEngine = 'unreachable';
+  }
+  try {
+    const syncRes = await fetch('http://localhost:3004/health', { signal: AbortSignal.timeout(2000) });
+    if (syncRes.ok) dataSync = 'ok';
+    else dataSync = 'degraded';
+  } catch {
+    dataSync = 'unreachable';
+  }
+
+  const overallStatus = dbStatus === 'ok' ? 'ok' : 'degraded';
+
   return NextResponse.json({
-    status: 'ok',
+    status: overallStatus,
     activeTasks,
     uptime: Math.floor(process.uptime()),
     engine: 'integrated',
+    database: dbStatus,
+    services: {
+      scanEngine,
+      dataSync,
+    },
   });
 }

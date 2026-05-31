@@ -6,6 +6,26 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { lookup } from 'dns/promises';
 
+// ─── Inline DNS Cache ─────────────────────────────────────────────────────────
+// DNS cache is inlined for mini-services independence
+const dnsCache = new Map<string, { address: string; family: number; expiresAt: number }>();
+const DNS_CACHE_TTL = 60_000; // 60 seconds
+
+function cachedLookup(hostname: string): Promise<{ address: string; family: number }> {
+  const cached = dnsCache.get(hostname);
+  if (cached && Date.now() < cached.expiresAt) {
+    return Promise.resolve({ address: cached.address, family: cached.family });
+  }
+  return lookup(hostname).then(result => {
+    dnsCache.set(hostname, { ...result, expiresAt: Date.now() + DNS_CACHE_TTL });
+    return result;
+  });
+}
+
+function invalidateDnsCache(hostname: string): void {
+  dnsCache.delete(hostname);
+}
+
 const execFileAsync = promisify(execFile);
 
 // Active scan tasks
@@ -752,8 +772,9 @@ async function fetchExternalResource(
   try {
     const extHostname = new URL(url).hostname;
     if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(extHostname)) {
-      const { address: resolvedIp } = await lookup(extHostname);
+      const { address: resolvedIp } = await cachedLookup(extHostname);
       if (!validateResolvedIP(resolvedIp)) {
+        invalidateDnsCache(extHostname);
         return null; // Silently block — don't fetch private IPs
       }
     }
@@ -1141,6 +1162,9 @@ export async function executeScan(
   let completedUrls = 0;
   const countedUrls = new Set<string>();
   const totalUrls = urls.length;
+  const scanStartTime = Date.now();
+  let totalDarkLinks = 0;
+  let currentUrlStartTime: number | undefined;
 
   const emitProgress = (currentUrl?: string) => {
     // Only count each URL once, even if retried
@@ -1148,6 +1172,10 @@ export async function executeScan(
       countedUrls.add(currentUrl);
       completedUrls++;
     }
+    const elapsed = Date.now() - scanStartTime;
+    const avgTimePerUrl = completedUrls > 0 ? Math.round(elapsed / completedUrls) : undefined;
+    const remaining = totalUrls - completedUrls;
+    const estimatedTimeRemaining = (avgTimePerUrl && remaining > 0) ? avgTimePerUrl * remaining : undefined;
     const progress: ScanProgress = {
       taskId,
       totalUrls,
@@ -1155,6 +1183,10 @@ export async function executeScan(
       progress: Math.round((completedUrls / totalUrls) * 100),
       status: abortController.signal.aborted ? 'stopped' : 'running',
       currentUrl,
+      currentUrlStartTime,
+      avgTimePerUrl,
+      estimatedTimeRemaining,
+      darkLinksFound: totalDarkLinks > 0 ? totalDarkLinks : undefined,
     };
     onProgress(progress);
   };
@@ -1233,6 +1265,9 @@ export async function executeScan(
     completedUrls: 0,
     progress: 0,
     status: 'running',
+    avgTimePerUrl: undefined,
+    estimatedTimeRemaining: undefined,
+    darkLinksFound: 0,
   });
 
   // Process URLs with concurrency control
@@ -1265,6 +1300,7 @@ export async function executeScan(
     // Assign a consistent fingerprint for this URL scan
     const fingerprint = getNextFingerprint();
 
+    currentUrlStartTime = Date.now();
     const startTime = Date.now();
     const result: ScanResultData = {
       url: urlConfig.url,
@@ -1287,8 +1323,9 @@ export async function executeScan(
       try {
         const urlHostname = new URL(urlConfig.url).hostname;
         if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(urlHostname)) {
-          const { address: resolvedIp } = await lookup(urlHostname);
+          const { address: resolvedIp } = await cachedLookup(urlHostname);
           if (!validateResolvedIP(resolvedIp)) {
+            invalidateDnsCache(urlHostname);
             result.status = 'error';
             result.errorMessage = `DNS rebinding protection: resolved IP ${resolvedIp} is private/reserved`;
             emitLog('warn', `DNS解析IP为私有地址，已阻止: ${urlConfig.url}`, `解析IP: ${resolvedIp}`);
@@ -1703,6 +1740,7 @@ export async function executeScan(
     // (emitProgress already called inside catch for non-retry failures)
     // (success paths call emitProgress inside processUrlInner before returning)
     emitProgress(urlConfig.url);
+    totalDarkLinks += result.darkLinks;
     onResult(result);
     return result;
   };
@@ -1753,12 +1791,18 @@ export async function executeScan(
     // Ensure completedUrls reflects unique URLs counted (not retries)
     completedUrls = countedUrls.size;
     const finalStatus: TaskStatus = abortController.signal.aborted ? 'stopped' : 'completed';
+    const elapsed = Date.now() - scanStartTime;
+    const avgTimePerUrl = completedUrls > 0 ? Math.round(elapsed / completedUrls) : undefined;
     onProgress({
       taskId,
       totalUrls,
       completedUrls,
       progress: finalStatus === 'completed' ? 100 : Math.round((completedUrls / totalUrls) * 100),
       status: finalStatus,
+      currentUrlStartTime: undefined,
+      avgTimePerUrl,
+      estimatedTimeRemaining: 0,
+      darkLinksFound: totalDarkLinks,
       completedAt: Date.now(),
     });
 

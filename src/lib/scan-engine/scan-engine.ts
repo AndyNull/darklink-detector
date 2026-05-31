@@ -7,7 +7,7 @@ import { TRUSTED_DOMAINS, extractDomain, isValidDomain, isSuspiciousDomain } fro
 import type { ScanRequest, ScanResultData, UrlConfig, ScanProgress, LogEntry, TaskStatus, UrlDetailData, DarkLinkData, QrCodeData } from './types';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { lookup } from 'dns/promises';
+import { cachedLookup, invalidateDnsCache } from './dns-cache';
 
 const execFileAsync = promisify(execFile);
 
@@ -438,8 +438,9 @@ async function fetchExternalResource(
   try {
     const extHostname = new URL(url).hostname;
     if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(extHostname)) {
-      const { address: resolvedIp } = await lookup(extHostname);
+      const { address: resolvedIp } = await cachedLookup(extHostname);
       if (!validateResolvedIP(resolvedIp)) {
+        invalidateDnsCache(extHostname);
         return null; // Silently block — don't fetch private IPs
       }
     }
@@ -1064,8 +1065,9 @@ export async function executeScan(
         const urlHostname = new URL(urlConfig.url).hostname;
         // Only perform DNS lookup for non-IP hostnames (IPs already validated by validateScanUrl)
         if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(urlHostname)) {
-          const { address: resolvedIp } = await lookup(urlHostname);
+          const { address: resolvedIp } = await cachedLookup(urlHostname);
           if (!validateResolvedIP(resolvedIp)) {
+            invalidateDnsCache(urlHostname);
             result.status = 'error';
             result.errorMessage = `DNS rebinding protection: resolved IP ${resolvedIp} is private/reserved`;
             emitLog('warn', `DNS解析IP为私有地址，已阻止: ${urlConfig.url}`, `解析IP: ${resolvedIp}`);
@@ -1152,8 +1154,9 @@ export async function executeScan(
             try {
               const urlObj = new URL(urlConfig.url);
               if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(urlObj.hostname)) {
-                const { address: resolvedIp } = await lookup(urlObj.hostname);
+                const { address: resolvedIp } = await cachedLookup(urlObj.hostname);
                 if (!validateResolvedIP(resolvedIp)) {
+                  invalidateDnsCache(urlObj.hostname);
                   throw new Error(`DNS resolution for ${urlObj.hostname} points to private/reserved IP: ${resolvedIp}`);
                 }
               }
@@ -1261,8 +1264,9 @@ export async function executeScan(
         try {
           const urlObj = new URL(urlConfig.url);
           if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(urlObj.hostname)) {
-            const { address: resolvedIp } = await lookup(urlObj.hostname);
+            const { address: resolvedIp } = await cachedLookup(urlObj.hostname);
             if (!validateResolvedIP(resolvedIp)) {
+              invalidateDnsCache(urlObj.hostname);
               throw new Error(`DNS resolution for ${urlObj.hostname} points to private/reserved IP: ${resolvedIp}`);
             }
           }
@@ -1306,8 +1310,9 @@ export async function executeScan(
         try {
           const urlObj = new URL(urlConfig.url);
           if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(urlObj.hostname)) {
-            const { address: resolvedIp } = await lookup(urlObj.hostname);
+            const { address: resolvedIp } = await cachedLookup(urlObj.hostname);
             if (!validateResolvedIP(resolvedIp)) {
+              invalidateDnsCache(urlObj.hostname);
               throw new Error(`DNS resolution for ${urlObj.hostname} points to private/reserved IP: ${resolvedIp}`);
             }
           }
@@ -1456,8 +1461,9 @@ export async function executeScan(
         try {
           const urlObj = new URL(urlConfig.url);
           if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(urlObj.hostname)) {
-            const { address: resolvedIp } = await lookup(urlObj.hostname);
+            const { address: resolvedIp } = await cachedLookup(urlObj.hostname);
             if (!validateResolvedIP(resolvedIp)) {
+              invalidateDnsCache(urlObj.hostname);
               throw new Error(`DNS resolution for ${urlObj.hostname} points to private/reserved IP: ${resolvedIp}`);
             }
           }

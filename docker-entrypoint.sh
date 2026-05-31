@@ -48,6 +48,10 @@ echo "[3/5] 启动数据同步服务 (port 3004)..."
 cd /app/mini-services/data-sync-service
 DB_PATH=/app/db/custom.db bun index.ts &
 SYNC_PID=$!
+sleep 0.5
+if ! kill -0 $SYNC_PID 2>/dev/null; then
+  echo "  ✗ 数据同步服务启动失败!"
+fi
 echo "  ✓ 数据同步服务已启动 (PID: $SYNC_PID)"
 
 # ─── 4. 启动扫描引擎 ───────────────────────────────────────────────────────
@@ -55,10 +59,25 @@ echo "[4/5] 启动扫描引擎 (port 3003)..."
 cd /app/mini-services/scan-engine
 bun index.ts &
 SCAN_PID=$!
+sleep 0.5
+if ! kill -0 $SCAN_PID 2>/dev/null; then
+  echo "  ✗ 扫描引擎启动失败!"
+fi
 echo "  ✓ 扫描引擎已启动 (PID: $SCAN_PID)"
 
-# 等待后端服务就绪
-sleep 2
+# Wait for mini-services to be ready
+echo "  等待后端服务就绪..."
+for i in $(seq 1 30); do
+  if curl -sf http://localhost:3003/health >/dev/null 2>&1 && \
+     curl -sf http://localhost:3004/health >/dev/null 2>&1; then
+    echo "  ✓ 后端服务已就绪 (${i}s)"
+    break
+  fi
+  if [ $i -eq 30 ]; then
+    echo "  ⚠ 后端服务未在30秒内就绪，继续启动..."
+  fi
+  sleep 1
+done
 
 # ─── 5. 启动主应用 ─────────────────────────────────────────────────────────
 echo "[5/5] 启动 Next.js 主应用 (port 3000)..."
@@ -98,5 +117,20 @@ trap cleanup SIGTERM SIGINT
 # standalone 模式输出的是 node 格式的 server.js，bun 兼容运行
 bun server.js &
 MAIN_PID=$!
+
+# Monitor background services and restart if crashed
+while kill -0 $MAIN_PID 2>/dev/null; do
+  if ! kill -0 $SCAN_PID 2>/dev/null; then
+    echo "[监控] 扫描引擎已停止，正在重启..."
+    cd /app/mini-services/scan-engine && bun index.ts &
+    SCAN_PID=$!
+  fi
+  if ! kill -0 $SYNC_PID 2>/dev/null; then
+    echo "[监控] 数据同步服务已停止，正在重启..."
+    cd /app/mini-services/data-sync-service && DB_PATH=/app/db/custom.db bun index.ts &
+    SYNC_PID=$!
+  fi
+  sleep 10
+done &
 
 wait $MAIN_PID

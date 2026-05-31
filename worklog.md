@@ -396,3 +396,295 @@ This listener was never removed, causing a memory leak for each URL that went th
 - TypeScript compilation passes (`npx tsc --noEmit` — no errors)
 - ESLint check passes for modified files (no new lint errors introduced)
 - Dev server running successfully
+
+---
+
+## Task 2+7: Dockerfile & docker-entrypoint.sh Improvements
+**Date**: 2025-05-31
+**Agent**: Sub-agent (Task 2+7)
+
+### Scope
+Improve Dockerfile and docker-entrypoint.sh with Playwright Chromium installation, reproducible builds via lockfiles, health check loop replacing blind sleep, service monitoring with auto-restart, and startup failure detection.
+
+---
+
+### Fix 1: Add Playwright Chromium to Dockerfile ✅
+**File**: `Dockerfile`
+**Problem**: Browser rendering (for detecting JS-generated QR codes) fails completely in Docker because Chromium binaries and system dependencies are not installed. The `browser-renderer.ts` calls `chromium.launch()` from Playwright but the image only includes npm packages, not the browser itself (~400MB).
+**Changes**:
+- Added `RUN npx playwright install --with-deps chromium` after the `apt-get install` line for curl/sqlite3 in the runner stage
+- This installs Chromium browser binaries plus all required system dependencies (libx11, libglib, libnss3, etc.)
+- Adds ~400MB to image size but is required for the browser rendering feature
+
+### Fix 2: Copy bun.lock for Reproducible Builds ✅
+**File**: `Dockerfile`
+**Problem**: The deps stage only copied `package.json` files, not `bun.lock`. Running `bun install` without a lockfile may resolve different dependency versions than used locally, leading to non-deterministic builds.
+**Changes**:
+- Added `COPY bun.lock ./` before `RUN bun install` in the deps stage
+- Added `COPY mini-services/scan-engine/bun.lock ./mini-services/scan-engine/`
+- Added `COPY mini-services/data-sync-service/bun.lock ./mini-services/data-sync-service/`
+- Ensures `bun install` uses exact dependency versions from the lockfiles
+
+### Fix 3: Replace `sleep 2` with Health Check Loop ✅
+**File**: `docker-entrypoint.sh`
+**Problem**: The entrypoint used a blind `sleep 2` to wait for mini-services, which is unreliable — services may not be ready in 2 seconds, or could be ready sooner with wasted wait time.
+**Changes**:
+- Replaced `sleep 2` with a proper readiness check loop that curl's `/health` endpoints on ports 3003 and 3004
+- Loop retries up to 30 times (1 second each) with clear progress output
+- Reports how many seconds it took for services to become ready
+- Falls through with a warning if services don't respond within 30 seconds (graceful degradation)
+
+### Fix 4: Add Service Monitoring Loop ✅
+**File**: `docker-entrypoint.sh`
+**Problem**: Mini-services were started with `&` (background) but never monitored. If a service crashed, the container stayed running (appearing healthy) but functionality was broken silently.
+**Changes**:
+- Added a background monitoring loop after `bun server.js &` that runs while `MAIN_PID` is alive
+- Every 10 seconds, checks if `$SCAN_PID` and `$SYNC_PID` are still running
+- If a service crashed, automatically restarts it and updates the PID variable
+- Runs as a background process (`&`) so it doesn't block `wait $MAIN_PID`
+
+### Fix 5: Verify Services Started Successfully ✅
+**File**: `docker-entrypoint.sh`
+**Problem**: `set -e` doesn't catch failures in background processes. If `bun index.ts &` fails immediately, the script continues silently, making the container appear healthy while services are down.
+**Changes**:
+- After `SYNC_PID=$!`, added `sleep 0.5` + `kill -0` check to verify data-sync-service started
+- After `SCAN_PID=$!`, added `sleep 0.5` + `kill -0` check to verify scan-engine started
+- Prints `✗` warning if a service failed to start (does not exit to allow graceful degradation)
+
+---
+
+### Verification
+- Dev server is running successfully
+- All changes are in Docker infrastructure files (not runtime code), verified by reading back both files
+
+---
+
+## Task 3+9: DNS Cache & Health Check Improvements
+**Date**: 2025-05-31
+**Agent**: Sub-agent (Task 3+9)
+
+### Scope
+Add DNS cache to scan engine for reduced latency on repeated hostname resolution, and improve the health check endpoint with database connectivity and mini-service status checks.
+
+---
+
+### Part A: Add DNS Cache to Scan Engine
+
+#### Step 1: Create dns-cache.ts Module ✅
+**File**: `src/lib/scan-engine/dns-cache.ts` (NEW)
+**Changes**:
+- Created new module with in-memory DNS cache using `Map<string, DnsCacheEntry>`
+- Default TTL: 60 seconds (balances catching DNS changes vs. caching benefit during batch scans)
+- Periodic cleanup of expired entries every 5 minutes
+- HMR-safe cleanup interval management via `globalThis.__dns_cache_cleanup__`
+- Exported functions:
+  - `cachedLookup(hostname, ttlMs?)` — resolves hostname with caching
+  - `invalidateDnsCache(hostname)` — removes a specific hostname from cache
+  - `clearDnsCache()` — clears entire cache
+  - `getDnsCacheStats()` — returns cache size and entry details for monitoring
+
+#### Step 2: Modify Main Scan Engine ✅
+**File**: `src/lib/scan-engine/scan-engine.ts`
+**Changes**:
+- Replaced `import { lookup } from 'dns/promises'` with `import { cachedLookup, invalidateDnsCache } from './dns-cache'`
+- Replaced all 6 occurrences of `await lookup(hostname)` with `await cachedLookup(hostname)`:
+  - Line 441: External resource DNS rebinding check (`fetchExternalResource`)
+  - Line 1068: Main DNS rebinding check (`processUrlInner`)
+  - Lines 1157, 1267, 1312, 1462: Curl fallback DNS rebinding checks
+- Added `invalidateDnsCache(hostname)` after every DNS rebinding check failure (6 locations):
+  - When `validateResolvedIP()` returns false, the cached entry for that hostname is invalidated
+  - This prevents a bad DNS resolution from being served to subsequent requests
+
+#### Step 3: Modify Mini-Services Scan Engine ✅
+**File**: `mini-services/scan-engine/scan-engine.ts`
+**Changes**:
+- Added inline DNS cache implementation at the top of the file (lines 9-27):
+  - `dnsCache` Map with `{ address, family, expiresAt }` entries
+  - `DNS_CACHE_TTL = 60_000` (60 seconds)
+  - `cachedLookup(hostname)` — resolves with caching, returns cached result if valid
+  - `invalidateDnsCache(hostname)` — removes specific hostname from cache
+- Kept `import { lookup } from 'dns/promises'` as the underlying resolver for the inline cache
+- Replaced 2 occurrences of `await lookup(hostname)` with `await cachedLookup(hostname)`:
+  - Line 775: External resource DNS rebinding check
+  - Line 1311: Main DNS rebinding check (`processUrlInner`)
+- Added `invalidateDnsCache(hostname)` after both DNS rebinding check failures
+
+---
+
+### Part B: Improve Health Check Endpoint ✅
+**File**: `src/app/api/health/route.ts`
+**Changes**:
+- Added `import { db } from '@/lib/db'` for database connectivity check
+- Added database health check using `db.$queryRaw\`SELECT 1\`` with `dbStatus` result ('ok' or 'error')
+- Added mini-service health checks with 2-second timeout:
+  - Scan engine (port 3003): Returns 'ok', 'degraded', or 'unreachable'
+  - Data sync service (port 3004): Returns 'ok', 'degraded', or 'unreachable'
+- Overall status is 'ok' if database is fine, 'degraded' if database has issues
+- Mini-service unavailability does not affect overall status (common in dev mode)
+- Enhanced response JSON with additional fields:
+  ```json
+  {
+    "status": "ok",
+    "activeTasks": 0,
+    "uptime": 7,
+    "engine": "integrated",
+    "database": "ok",
+    "services": {
+      "scanEngine": "ok",
+      "dataSync": "ok"
+    }
+  }
+  ```
+
+---
+
+### Verification
+- TypeScript compilation passes (`npx tsc --noEmit` — no errors)
+- ESLint passes for all modified files (no new lint errors)
+- Dev server starts successfully and serves the health endpoint
+- Health endpoint returns correct JSON with database and service status
+
+---
+
+## Task 4+5: Fix Source Code Preview Bug & Improve Malicious Keyword Precision
+**Date**: 2025-05-31
+**Agent**: Sub-agent (Task 4+5)
+
+### Scope
+Two-part fix: (A) Remove authentication from /api/scan/html endpoint to fix source code preview, and (B) improve malicious keyword precision by introducing context-aware detection to reduce false positives.
+
+---
+
+### Part A: Remove Auth from /api/scan/html ✅
+
+**File**: `src/app/api/scan/html/route.ts`
+**Problem**: The `/api/scan/html` endpoint used `requireSessionAuth` which required a login session token. The user explicitly specified that scanning, viewing scan results, and searching the malicious library should be OPEN — no authentication required. This caused the source code preview to show no data (returns 401 when no valid session exists). The other `/api/scan` GET endpoints (status, results, logs) were already public.
+**Changes**:
+- Removed `import { requireSessionAuth } from '@/lib/api-auth'`
+- Removed the `const authError = await requireSessionAuth(request)` check and early return
+- Updated JSDoc comment to note that the endpoint is publicly accessible (same as other scan GET endpoints)
+- Verified the endpoint returns proper JSON response (`{"error":"未找到扫描结果"}` for missing data, not 401)
+
+---
+
+### Part B: Improve Malicious Keyword Precision ✅
+
+**Files**: `src/lib/scan-engine/html-parser.ts`, `mini-services/scan-engine/html-parser.ts`
+
+**Problem**: The MALICIOUS_KEYWORDS array contained overly broad standalone keywords that caused false positives on legitimate sites:
+- '贷款' (loan), '借款' (borrow), '小贷' (micro-loan), '网贷' (online lending), '现金贷' (cash loan) — legitimate in banking/financial contexts
+- '量化交易' (quantitative trading), '合约交易' (contract trading), '币圈' (crypto circle) — legitimate finance terms
+- '客服QQ', '在线客服', '官方客服', '客服微信' — virtually every e-commerce site uses these
+- '限时优惠', '仅限今日', '最后机会' — legitimate marketing language
+- '高仿手表', '高仿包包', '精仿鞋子' — overly specific; '高仿', '精仿', '仿品' are sufficient
+
+**Strategy**:
+1. Remove overly broad standalone keywords from MALICIOUS_KEYWORDS
+2. Add new CONTEXT_KEYWORDS array for keywords that are only suspicious when combined with other suspicious indicators
+3. Add context-aware detection rule (10a-ctx) that only flags CONTEXT_KEYWORDS when combined with suspicious indicators
+
+**Changes (applied to both files)**:
+
+1. **Removed from MALICIOUS_KEYWORDS**:
+   - '贷款', '借款', '小贷', '网贷', '现金贷' (financial — too broad standalone)
+   - '量化交易', '合约交易', '币圈' (crypto — too broad standalone)
+   - '客服QQ', '在线客服', '官方客服', '客服微信' (customer service — too broad)
+   - '限时优惠', '仅限今日', '最后机会' (marketing — too broad)
+   - '高仿手表', '高仿包包', '精仿鞋子' (overly specific; '高仿', '精仿', '仿品' remain)
+   - '炒币' (moved to CONTEXT_KEYWORDS)
+
+2. **Added CONTEXT_KEYWORDS array** after MALICIOUS_KEYWORDS:
+   - Financial context keywords: '贷款', '借款', '网贷', '现金贷', '小额贷款', '极速放款', '量化交易', '合约交易'
+   - Customer service context keywords: '客服QQ', '在线客服', '官方客服', '客服微信'
+   - Marketing context keywords: '限时优惠', '仅限今日', '最后机会'
+   - Crypto context keywords: '币圈', '炒币', '虚拟币'
+
+3. **Added CONTEXT_KEYWORD_REGEX** — pre-compiled regex for fast matching, same pattern as MALICIOUS_KEYWORD_REGEX
+
+4. **Added rule 10a-ctx** — Context-aware keyword detection:
+   - After the existing 10a rule, scans urlDetails for CONTEXT_KEYWORD matches
+   - Skips if already flagged by 10a (avoids duplicate severity)
+   - Only flags when a CONTEXT_KEYWORD is found AND at least one suspicious indicator is present:
+     - Different domain + cheap TLD (and not in LEGIT_CHEAP_TLD_DOMAINS)
+     - URL shortener domain
+     - Hidden element (not visible)
+     - Suspicious domain (typo/homoglyph/deceptive pattern)
+   - Severity: `medium` (vs `critical` for true MALICIOUS_KEYWORDS)
+   - Description includes the matched keyword and which suspicious indicators were found
+
+---
+
+### Verification
+- TypeScript compilation passes (`npx tsc --noEmit` — no errors)
+- ESLint: no new errors introduced in modified files (pre-existing errors are unrelated)
+- Dev server starts successfully
+- `/api/scan/html` endpoint returns proper JSON (no longer returns 401)
+- Both html-parser.ts files (main + mini-services) updated with identical keyword changes
+
+## Task 8: Synchronize ScanProgress Type Between Main and Mini-Services
+**Date**: 2025-05-31
+**Agent**: Sub-agent (Task 8)
+
+### Scope
+Synchronize the `ScanProgress` interface between `src/lib/scan-engine/types.ts` and `mini-services/scan-engine/types.ts`, and ensure the mini-services scan engine emits the newly added fields in its progress updates.
+
+---
+
+### Fix 1: Add Missing Fields to Mini-Services ScanProgress Interface ✅
+
+**File**: `mini-services/scan-engine/types.ts`
+**Problem**: The `ScanProgress` interface was missing 4 fields that exist in the main version: `currentUrlStartTime`, `avgTimePerUrl`, `estimatedTimeRemaining`, `darkLinksFound`. This caused a type mismatch between the two codebases, meaning clients consuming progress events from the mini-service would never receive these useful tracking fields.
+**Changes**:
+- Added `currentUrlStartTime?: number` — Timestamp when the current URL started processing
+- Added `avgTimePerUrl?: number` — Average time per URL in ms (based on completed URLs)
+- Added `estimatedTimeRemaining?: number` — Estimated time remaining in ms
+- Added `darkLinksFound?: number` — Number of dark links found so far
+- All fields are optional with JSDoc comments, matching the main types.ts exactly
+
+---
+
+### Fix 2: Emit New Fields in Mini-Services Scan Engine Progress Updates ✅
+
+**File**: `mini-services/scan-engine/scan-engine.ts`
+**Problem**: The `emitProgress` function and all `onProgress` call sites in the mini-services scan engine only emitted the old fields (`taskId`, `totalUrls`, `completedUrls`, `progress`, `status`, `currentUrl`, `completedAt`). The new fields were never populated, so even if the type was updated, the values would always be `undefined`.
+**Changes**:
+
+1. **Added tracking variables** (after `totalUrls` declaration):
+   - `scanStartTime = Date.now()` — Records when the scan started (for elapsed time computation)
+   - `totalDarkLinks = 0` — Running count of dark links found across all completed URLs
+   - `currentUrlStartTime: number | undefined` — Tracks when the current URL began processing
+
+2. **Updated `emitProgress` function** to compute and include new fields:
+   - `currentUrlStartTime` — Set from the module-level variable (updated each time a URL starts)
+   - `avgTimePerUrl` — Computed as `Math.round(elapsed / completedUrls)` when >0 URLs completed
+   - `estimatedTimeRemaining` — Computed as `avgTimePerUrl * remainingUrls` when both are available
+   - `darkLinksFound` — Includes `totalDarkLinks` count when >0
+
+3. **Set `currentUrlStartTime`** at the beginning of `processUrlInner()`, right before `startTime`:
+   - `currentUrlStartTime = Date.now()` — Updated each time a new URL begins processing
+
+4. **Track dark link count** when results are returned:
+   - Added `totalDarkLinks += result.darkLinks` after `emitProgress` in the `processUrl` function, before `onResult(result)`
+
+5. **Updated initial progress emission** (scan start):
+   - Added `avgTimePerUrl: undefined`, `estimatedTimeRemaining: undefined`, `darkLinksFound: 0`
+
+6. **Updated final progress emission** (scan completion):
+   - Computes `avgTimePerUrl` from `scanStartTime` and `completedUrls`
+   - Sets `currentUrlStartTime: undefined` (no URL being processed at completion)
+   - Sets `estimatedTimeRemaining: 0` (scan is done)
+   - Sets `darkLinksFound: totalDarkLinks` (final count)
+
+---
+
+### Fix 3: Verify Mini-Services index.ts ✅
+
+**File**: `mini-services/scan-engine/index.ts`
+**Analysis**: The `index.ts` passes `ScanProgress` objects through transparently — it stores them in `taskProgress` map and emits them via Socket.IO (`io.emit('scan:progress', progress)`). No direct usage of the new fields was found. The only field accessed from `ScanProgress` is `completedAt` (line 18, for task cleanup), which already existed. No changes needed.
+
+---
+
+### Verification
+- ESLint passes for modified files (no new lint errors)
+- Dev server is running successfully
+- Types are now synchronized between main and mini-services versions

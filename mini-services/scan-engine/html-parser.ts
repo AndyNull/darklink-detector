@@ -54,15 +54,13 @@ const MALICIOUS_KEYWORDS = [
   // 色情/成人
   '色情', '成人网站', '色网', '招嫖', '成人直播', '色播', '裸聊',
   '同城约', '一夜情', '约炮', '裸聊', '色诱',
-  // 贷款/金融
-  '贷款', '借款', '小贷', '网贷', '现金贷',
   // 非法服务
   '代孕', '办证', '刷单', '仿牌', '假证', '私服', '外挂',
   '微信加粉', '涨粉', '买粉', '代开', '代发', '代刷',
   '黑客', '钓鱼', '木马', '挂马', '暗网', '洗钱', '传销', '诈骗',
   '黑产', '网赚', '刷信誉',
-  // 加密货币诈骗
-  '量化交易', '合约交易', '币圈', '炒币', '虚拟货币投资', '数字货币投资',
+  // 加密货币诈骗 (specific scam patterns only; broad terms moved to CONTEXT_KEYWORDS)
+  '虚拟货币投资', '数字货币投资',
   '申购分红', '认购返利', '理财收益保障', '高频套利', '保本理财',
   '数字货币平台', '虚拟币交易', '加密资产', '币圈韭菜', '空气币',
   // 钓鱼/身份盗窃
@@ -81,14 +79,12 @@ const MALICIOUS_KEYWORDS = [
   // SEO作弊
   '外链代发', '黑帽SEO', '快排', '刷排名', '刷流量', '刷点击',
   '站群', '蜘蛛池', '权重出售', '友链出售',
-  // 钓鱼关键词
-  '官方客服', '在线客服', '客服QQ', '客服微信',
-  '限时优惠', '仅限今日', '最后机会',
   // 违法医疗
   '代孕妈妈', '试管代孕', '精子库', '卵子出售',
   '壮阳药', '延时药', '增大药', '性药',
-  // 仿冒/走私
-  '高仿手表', '高仿包包', '精仿鞋子', 'A货',
+  // 仿冒/走私 (removed overly specific '高仿手表', '高仿包包', '精仿鞋子' —
+  // '高仿', '精仿', '仿品' above are sufficient and less prone to false positives)
+  'A货',
   '走私车', '抵押车', '二手车低价',
   '仿真枪', '电击器', '防身器材',
   // ─── Japanese malicious keywords (暗链常见日语关键词) ───
@@ -134,6 +130,32 @@ const MALICIOUS_KEYWORDS = [
   '/goto/', '/forward/', '/redir/', '/traffic/', '/promo/',
   '/partner/', '/sponsor/', '/campaign/', '/landing/',
 ];
+
+// ─── Context-sensitive keywords ──────────────────────────────────────────────
+// Keywords that are only suspicious in certain contexts.
+// These are NOT matched as standalone malicious keywords.
+// They are only flagged when found in combination with other suspicious indicators
+// (hidden elements, suspicious domain, cheap TLD, URL shortener, etc.)
+// Synced from src/lib/scan-engine/html-parser.ts
+const CONTEXT_KEYWORDS = [
+  // Financial - legitimate alone, suspicious with hidden/obscured links
+  '贷款', '借款', '网贷', '现金贷', '小额贷款', '极速放款',
+  '量化交易', '合约交易',
+  // Customer service - legitimate alone, suspicious with hidden links
+  '客服QQ', '在线客服', '官方客服', '客服微信',
+  // Marketing - legitimate alone, suspicious with hidden links
+  '限时优惠', '仅限今日', '最后机会',
+  // Crypto - legitimate alone, suspicious with hidden links
+  '币圈', '炒币', '虚拟币',
+];
+
+const CONTEXT_KEYWORD_REGEX = new RegExp(
+  CONTEXT_KEYWORDS
+    .map(kw => kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) // escape regex special chars
+    .sort((a, b) => b.length - a.length) // longer keywords first for greedy match
+    .join('|'),
+  'i'
+);
 
 // ─── Suspicious URL shorteners ───────────────────────────────────────────────
 // Synced from src/lib/scan-engine/shared-constants.ts
@@ -549,6 +571,46 @@ export function parseHtml(html: string, baseUrl: string, disabledRules: string[]
           evidence: `keyword="${matchedKeyword}" in url="${detail.url}" (domain: ${detail.domain}, ${detail.urlCount || 1} URLs)`,
         });
       }
+    }
+  }
+
+  // 10a-ctx. Context-aware keyword detection
+  // Keywords like '贷款', '客服QQ', etc. are only flagged when found in a URL
+  // that also has another suspicious indicator (different domain + cheap TLD,
+  // hidden element, URL shortener, etc.). This reduces false positives on
+  // legitimate banking/financial/e-commerce sites.
+  for (const detail of urlDetails) {
+    const urlLower = detail.url.toLowerCase();
+    const ctxMatch = urlLower.match(CONTEXT_KEYWORD_REGEX);
+    if (!ctxMatch) continue;
+    const matchedKeyword = ctxMatch[0];
+    const dedupKey = `${detail.domain}|malicious_keyword`;
+    if (darkLinkSeen.has(dedupKey)) continue; // already flagged by 10a
+
+    // Check for suspicious context indicators
+    const domain = detail.domain;
+    const tld = domain?.split('.').pop()?.toLowerCase() || '';
+    const hasCheapTld = domain && detail.isExternal && CHEAP_TLDS_SET.has(tld) && !LEGIT_CHEAP_TLD_DOMAINS.has(domain);
+    const hasShortener = domain && URL_SHORTENERS_SET.has(domain);
+    const hasHiddenElement = !detail.isVisible;
+    const isSuspicious = domain && baseDomain && domain !== baseDomain && isSuspiciousDomain(domain, baseDomain);
+
+    if (hasCheapTld || hasShortener || hasHiddenElement || isSuspicious) {
+      darkLinkSeen.add(dedupKey);
+      const indicators: string[] = [];
+      if (hasCheapTld) indicators.push(`廉价TLD(.${tld})`);
+      if (hasShortener) indicators.push('短链服务');
+      if (hasHiddenElement) indicators.push('隐藏元素');
+      if (isSuspicious) indicators.push('可疑域名');
+      darkLinkDetails.push({
+        url: detail.url,
+        tag: detail.tag,
+        text: detail.text || undefined,
+        type: 'malicious_keyword',
+        severity: 'medium',
+        description: `URL包含上下文可疑关键词: "${matchedKeyword}" (伴随${indicators.join(' + ')})`,
+        evidence: `context_keyword="${matchedKeyword}" in url="${detail.url}" indicators=[${indicators.join(',')}] (domain: ${domain}, ${detail.urlCount || 1} URLs)`,
+      });
     }
   }
   }
