@@ -12,14 +12,12 @@ echo "║         暗链检测系统  ·  Docker 启动             ║"
 echo "╚══════════════════════════════════════════════════╝"
 echo ""
 
-# ─── 1. 初始化数据库 ─────────────────────────────────────────────────────────
-if [ ! -f /app/db/custom.db ]; then
-  echo "[1/5] 初始化数据库..."
-  cd /app && bunx prisma db push --skip-generate 2>&1
-  echo "  ✓ 数据库初始化完成"
-else
-  echo "[1/5] 数据库已存在，跳过初始化"
-fi
+# ─── 1. 初始化/同步数据库 ───────────────────────────────────────────────────
+# Always run prisma db push — it's idempotent and ensures the schema is up-to-date.
+# This handles both first-run (creates DB) and upgrades (applies schema changes).
+echo "[1/5] 同步数据库 schema..."
+cd /app && bunx prisma db push --skip-generate 2>&1
+echo "  ✓ 数据库 schema 同步完成"
 
 # ─── 2. 确保默认管理员账户 ───────────────────────────────────────────────────
 echo "[2/5] 检查管理员账户..."

@@ -1415,3 +1415,165 @@ Stage Summary:
 - Version: 1.10.0 → 1.12.0 (consistent across all files)
 - Build: PASS
 - GitHub: PUSHED
+
+## Task 2 (Version Unification): Single Source of Truth for Version Number
+**Date**: 2025-06-01
+**Agent**: Sub-agent (Task 2 - Version Unification)
+
+### Scope
+Ensure the version "1.12.0" is defined in a single canonical location (`package.json`) and all other references derive from it automatically. Create a sync script for mini-service package.json files.
+
+---
+
+### Verification Findings
+
+| File | Status | Notes |
+|------|--------|-------|
+| `package.json` | ✅ Canonical source | `"version": "1.12.0"` |
+| `src/lib/version.ts` | ✅ Correct | Reads from package.json (server: `fs.readFileSync`, client: `NEXT_PUBLIC_APP_VERSION` env var) |
+| `src/lib/config.ts` | ✅ Correct | Imports `APP_VERSION_NUMBER` from `./version`, uses it as default `app.version` |
+| `config.yaml` | ✅ Correct | No `version` field; only comments noting version is auto-read from package.json |
+| `next.config.ts` | ✅ Correct | Reads from package.json, injects `NEXT_PUBLIC_APP_VERSION` env var for client builds |
+| `mini-services/scan-engine/package.json` | ❌ Was `"1.0.0"` | Independent version — now synced to `1.12.0` |
+| `mini-services/data-sync-service/package.json` | ❌ Was `"1.0.0"` | Independent version — now synced to `1.12.0` |
+
+### Changes Made
+
+#### 1. Created `scripts/sync-version.ts` ✅ (NEW FILE)
+- Reads version from root `package.json`
+- Updates all mini-service `package.json` files to match
+- Currently syncs: `mini-services/scan-engine/package.json`, `mini-services/data-sync-service/package.json`
+- Skips files already at the correct version (idempotent)
+- Gracefully handles missing files (warns and skips)
+- Usage: `bun scripts/sync-version.ts` or `bun run version-sync`
+
+#### 2. Added npm scripts to root `package.json` ✅
+- `"version-sync": "bun scripts/sync-version.ts"` — Manual sync command
+- `"postversion": "bun scripts/sync-version.ts"` — Auto-syncs mini-service versions after `npm version` / `bun version`
+
+#### 3. Ran sync — updated mini-service versions ✅
+- `mini-services/scan-engine/package.json`: `1.0.0` → `1.12.0`
+- `mini-services/data-sync-service/package.json`: `1.0.0` → `1.12.0`
+
+### Version Derivation Chain
+
+```
+package.json (CANONICAL: "1.12.0")
+  ├── next.config.ts → reads at build time → sets NEXT_PUBLIC_APP_VERSION env var
+  │     └── src/lib/version.ts (client side) → reads NEXT_PUBLIC_APP_VERSION
+  ├── src/lib/version.ts (server side) → reads package.json via fs.readFileSync
+  │     ├── src/lib/config.ts → imports APP_VERSION_NUMBER → uses as app.version default
+  │     ├── src/lib/system-config.ts → re-exports APP_VERSION
+  │     ├── src/app/api/route.ts → imports APP_VERSION
+  │     ├── src/app/api/download/route.ts → imports APP_VERSION, ARCHIVE_NAME
+  │     ├── src/components/login-page.tsx → imports APP_VERSION
+  │     └── src/components/settings/settings-page.tsx → imports APP_VERSION
+  └── scripts/sync-version.ts → reads & copies to mini-service package.json files
+        ├── mini-services/scan-engine/package.json → synced to "1.12.0"
+        └── mini-services/data-sync-service/package.json → synced to "1.12.0"
+```
+
+### Verification
+- `bun scripts/sync-version.ts` runs successfully, syncs both files
+- Running again shows "already at 1.12.0 (skipped)" — idempotent
+- No TypeScript errors introduced
+
+---
+
+## Task 4: Docker Build & Runtime Verification
+**Date**: 2025-06-01
+**Agent**: Sub-agent (Task 4)
+
+### Scope
+Thorough code review of all Docker configuration files (Dockerfile, docker-entrypoint.sh, docker-compose.yml, start.sh, .dockerignore) for correctness and runnability. Verified standalone output, Prisma setup, mini-services dependencies, Playwright installation, permissions, environment variables, volume mounts, and hardcoded paths.
+
+---
+
+### Issues Found & Fixes Applied
+
+#### CRITICAL: Playwright Browser Binary Permissions ✅ FIXED
+
+**File**: `Dockerfile`
+**Problem**: The Dockerfile ran `bunx playwright install --with-deps chromium` as root, which installed the Chromium browser binary to `/root/.cache/ms-playwright/`. However, the app runs as `appuser` (uid 1001) after `USER appuser`, and appuser cannot access `/root/.cache/`. When `browser-renderer.ts` calls `chromium.launch()`, Playwright would fail with "Executable doesn't exist" because it looks for the browser in `~/.cache/ms-playwright/` (which for appuser is `/home/appuser/.cache/ms-playwright/`, which doesn't exist).
+**Fix**:
+1. Moved user creation (`addgroup`/`adduser`) before Playwright install so `chown` can reference appuser:appgroup
+2. Added `ENV PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright` to install browsers to a shared location
+3. Added `chown -R appuser:appgroup /app/.cache` after Playwright install so appuser can access the browser binaries
+4. Added `PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright` to docker-compose.yml environment for consistency
+
+#### MAJOR: Standalone .env Contains Hardcoded Dev Path ✅ FIXED
+
+**File**: `Dockerfile`
+**Problem**: The Next.js standalone output includes a `.env` file generated during the build. This file contains `DATABASE_URL=file:/home/z/my-project/db/custom.db` — an absolute path from the development machine. In Docker, the app runs from `/app`, so this path is invalid. While the Dockerfile sets `ENV DATABASE_URL=file:./db/custom.db` which takes precedence, having a hardcoded wrong path in `.env` is a latent bug that could confuse debugging.
+**Fix**: Added a `RUN echo 'DATABASE_URL=file:./db/custom.db' > .env && chown appuser:appgroup .env` step after the standalone COPY to overwrite the `.env` file with the correct Docker-relative path.
+
+#### MAJOR: daemon.ts Hardcoded Path ✅ FIXED
+
+**File**: `mini-services/scan-engine/daemon.ts`
+**Problem**: Line 16 had `cwd: '/home/z/my-project/mini-services/scan-engine'` — a hardcoded absolute path that breaks in Docker where the app runs from `/app`. While daemon.ts is not used by the Docker entrypoint (which starts `bun index.ts` directly), it's a latent bug that would break if someone tried to use the daemon wrapper in Docker.
+**Fix**: Replaced the hardcoded path with `resolve(__dirname, '.')` using `import { dirname, resolve } from 'path'` and `const __dirname = dirname(new URL(import.meta.url).pathname)`.
+
+#### MAJOR: Database Schema Not Synced on Container Start ✅ FIXED
+
+**File**: `docker-entrypoint.sh`
+**Problem**: The entrypoint only ran `prisma db push` when `/app/db/custom.db` didn't exist. However, the standalone output includes `db/custom.db` from the build (a copy of the dev database). When Docker mounts a new named volume, it copies content from the image — so the database file DOES exist on first run, causing `prisma db push` to be skipped. If the schema has changed since the build, the database may have an outdated schema.
+**Fix**: Changed the entrypoint to always run `prisma db push --skip-generate` on every container start. This is idempotent — it creates tables if they don't exist and updates the schema if it has changed.
+
+#### MAJOR: docker-compose.yml HEALTHCHECK Mismatch ✅ FIXED
+
+**File**: `docker-compose.yml`
+**Problem**: The `start_period` in docker-compose.yml was `30s` while the Dockerfile HEALTHCHECK had `start_period=40s`. The services need more than 30 seconds to fully start (database init + mini-service readiness + Next.js startup), so 30s was too short and would cause false unhealthy reports.
+**Fix**: Changed `start_period` to `40s` to match the Dockerfile value.
+
+---
+
+### Remaining Issues (Not Fixed — Reported for Awareness)
+
+#### MEDIUM: Volume Permission Edge Case
+**Files**: `docker-compose.yml`, `Dockerfile`
+**Problem**: Named volumes `darklink-db:/app/db` and `darklink-config:/app/config` are mounted. On first run, Docker copies directory content (including permissions) from the image, so permissions are correct. However, if a volume already exists from a previous run or is mounted from a different source, it may have root ownership, causing "permission denied" errors for appuser.
+**Recommendation**: If this becomes an issue, restructure the entrypoint to run as root initially, fix permissions, then use `gosu` to drop to appuser. This is a significant architectural change and was not applied.
+
+#### MINOR: Standalone Output Includes Unnecessary Files
+**Problem**: The standalone build (`.next/standalone/`) includes `Dockerfile`, `docker-compose.yml`, `Caddyfile`, `start.sh`, `examples/`, `agent-ctx/`, `CHANGELOG.md`, `LICENSE`, `README.md`, etc. These add unnecessary size to the Docker image.
+**Recommendation**: Add `outputFileTracingExcludes` in `next.config.ts`:
+```ts
+outputFileTracingExcludes: {
+  '*': ['Dockerfile', 'docker-compose.yml', 'Caddyfile', 'start.sh', 'examples', 'scripts', 'agent-ctx', 'CHANGELOG.md', 'LICENSE', 'README.md'],
+}
+```
+
+#### MINOR: Playwright in serverExternalPackages
+**File**: `next.config.ts:26`
+**Problem**: `playwright` and `playwright-core` are listed in `serverExternalPackages`, adding ~11MB to the standalone build. The main scan engine (`src/lib/scan-engine/scan-engine.ts`) does import from `browser-renderer.ts` which uses Playwright, so this is actually needed for the standalone server. However, the mini-services scan engine does NOT use Playwright — it uses `browser-sim.ts` which only generates fingerprint data.
+**Recommendation**: Keep as-is since the main scan engine uses Playwright. The 11MB overhead is acceptable for the feature it enables.
+
+#### INFO: Redundant public/ COPY in Dockerfile
+**Problem**: The Dockerfile copies `public/` explicitly (line 76), but the standalone output already includes it (the build script does `cp -r public .next/standalone/`). The second copy overwrites the same content.
+**Recommendation**: Harmless — leave as-is for safety. If the build script is ever changed, this explicit copy ensures correctness.
+
+---
+
+### Verification Summary
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Dockerfile build stages | ✅ Correct | deps → builder → runner flow is sound |
+| Standalone output COPY | ✅ Correct | static, public, standalone all properly copied |
+| Prisma client + CLI | ✅ Correct | .prisma, @prisma, prisma CLI all copied from builder |
+| Mini-services with deps | ✅ Correct | Full mini-services copied AFTER standalone (overwrites source-only copy) |
+| bun.lock files | ✅ Verified | All 3 lockfiles exist (root, scan-engine, data-sync-service) |
+| Playwright install | ✅ Fixed | Browsers in shared path with appuser ownership |
+| Entrypoint logic | ✅ Fixed | Always runs prisma db push, health checks, monitoring loop |
+| Non-root user permissions | ✅ Fixed | All files chowned, Playwright cache accessible |
+| Environment variables | ✅ Correct | NODE_ENV, DATABASE_URL, PLAYWRIGHT_BROWSERS_PATH, NEXT_TELEMETRY_DISABLED |
+| Volume declarations | ✅ Correct | /app/db and /app/config with proper ownership |
+| .dockerignore | ✅ Reasonable | Excludes .git, node_modules, .next, db/*.db, dev files |
+| start.sh vs Docker entrypoint | ✅ Consistent | start.sh uses `bun --hot` (dev), entrypoint uses `bun` (prod) |
+| Hardcoded paths | ✅ Fixed | daemon.ts now uses import.meta.dir; engine-manager.ts was already fixed |
+
+### Files Modified
+1. `Dockerfile` — Playwright permissions, .env fix, user creation reorder
+2. `docker-entrypoint.sh` — Always run prisma db push
+3. `docker-compose.yml` — Added PLAYWRIGHT_BROWSERS_PATH, fixed start_period
+4. `mini-services/scan-engine/daemon.ts` — Removed hardcoded path

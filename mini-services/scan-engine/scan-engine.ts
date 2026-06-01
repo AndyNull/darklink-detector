@@ -1418,7 +1418,6 @@ export async function executeScan(
             emitLog('info', `简单请求也失败，尝试curl回退: ${urlConfig.url}`);
             try {
               const curlResult = await fetchWithCurl(urlConfig.url, timeout, urlConfig.headers, fingerprint.userAgent);
-              const curlResult = await fetchWithCurl(urlConfig.url, timeout, urlConfig.headers, fingerprint.userAgent);
               if (curlResult.html && curlResult.html.length > 0) {
                 // Create a synthetic response from curl result
                 result.statusCode = curlResult.statusCode;

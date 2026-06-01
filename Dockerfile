@@ -48,17 +48,21 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends curl sqlite3 && \
     rm -rf /var/lib/apt/lists/*
 
+# 创建非 root 用户
+RUN addgroup --system --gid 1001 appgroup && \
+    adduser --system --uid 1001 appuser
+
 # Install Playwright Chromium for browser rendering (dark link detection)
-RUN bunx playwright install --with-deps chromium
+# Set PLAYWRIGHT_BROWSERS_PATH to a shared location so appuser can access it
+# Must be after user creation so chown can reference appuser:appgroup
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright
+RUN bunx playwright install --with-deps chromium && \
+    chown -R appuser:appgroup /app/.cache
 
 # 环境变量
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL=file:./db/custom.db
-
-# 创建非 root 用户
-RUN addgroup --system --gid 1001 appgroup && \
-    adduser --system --uid 1001 appuser
 
 # 创建持久化目录
 RUN mkdir -p /app/db /app/config && \
@@ -70,6 +74,11 @@ RUN mkdir -p /app/db /app/config && \
 COPY --from=builder --chown=appuser:appgroup /app/.next/standalone ./
 COPY --from=builder --chown=appuser:appgroup /app/.next/static ./.next/static
 COPY --from=builder --chown=appuser:appgroup /app/public ./public
+
+# Fix standalone .env with hardcoded dev path — override with correct Docker path
+# (standalone output includes .env from build with absolute dev-machine paths)
+RUN echo 'DATABASE_URL=file:./db/custom.db' > .env && \
+    chown appuser:appgroup .env
 
 # ── 复制 Prisma（运行时 db:push 需要）──
 COPY --from=builder --chown=appuser:appgroup /app/prisma ./prisma

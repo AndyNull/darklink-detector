@@ -1,7 +1,9 @@
 // Daemon wrapper that keeps the scan engine alive
 import { spawn } from 'child_process';
 import { createWriteStream } from 'fs';
+import { dirname, resolve } from 'path';
 
+const __dirname = dirname(new URL(import.meta.url).pathname);
 const logStream = createWriteStream('/tmp/scan-engine-daemon.log', { flags: 'a' });
 
 function log(msg: string) {
@@ -13,7 +15,7 @@ function log(msg: string) {
 function startEngine(): Promise<number> {
   return new Promise((resolve) => {
     const child = spawn('bun', ['index.ts'], {
-      cwd: '/home/z/my-project/mini-services/scan-engine',
+      cwd: resolve(__dirname, '.'),
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
     });
