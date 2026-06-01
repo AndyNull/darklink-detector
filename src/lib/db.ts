@@ -15,8 +15,10 @@ if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
 
 // Enable WAL mode for SQLite for better concurrent read/write performance
 // WAL allows readers and writers to operate concurrently without blocking
+// Note: PRAGMA journal_mode=WAL returns a result row, so we must use $queryRaw
+// instead of $executeRawUnsafe (which fails with "Execute returned results")
 if (getEffectiveProvider() === 'sqlite') {
-  db.$executeRawUnsafe('PRAGMA journal_mode=WAL').catch((err: unknown) => {
+  db.$queryRaw`PRAGMA journal_mode=WAL`.catch((err: unknown) => {
     console.warn('[DB] Failed to enable WAL mode:', err);
   });
 }
