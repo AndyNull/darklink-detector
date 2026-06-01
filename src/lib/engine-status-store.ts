@@ -36,7 +36,7 @@ function scheduleNextPoll(getStore: () => EngineStatusStore) {
   const store = getStore();
   const anyOffline = store.scanEngineStatus === 'offline' || store.dataSyncStatus === 'offline';
   const anyChecking = store.scanEngineStatus === 'checking' || store.dataSyncStatus === 'checking';
-  const pollInterval = (anyOffline || anyChecking) ? 10000 : 30000;
+  const pollInterval = (anyOffline || anyChecking) ? 30000 : 60000;
 
   pollingIntervalId = setInterval(() => {
     const now = Date.now();
@@ -76,31 +76,6 @@ export const useEngineStatusStore = create<EngineStatusStore>((set, get) => ({
             ? { uptime: data.dataSyncService.uptime, connectedClients: data.dataSyncService.connectedClients }
             : null,
         });
-
-        // If any service is offline, the API will trigger auto-start.
-        // Schedule a follow-up check to pick up the auto-started status.
-        const anyOffline = data.scanEngine?.status !== 'online' || data.dataSyncService?.status !== 'online';
-        if (anyOffline) {
-          setTimeout(() => {
-            fetch('/api/engine/status')
-              .then(r => r.ok ? r.json() : null)
-              .then(followUpData => {
-                if (followUpData) {
-                  set({
-                    scanEngineStatus: followUpData.scanEngine?.status === 'online' ? 'online' : 'offline',
-                    dataSyncStatus: followUpData.dataSyncService?.status === 'online' ? 'online' : 'offline',
-                    scanEngineDetails: followUpData.scanEngine
-                      ? { uptime: followUpData.scanEngine.uptime, activeTasks: followUpData.scanEngine.activeTasks }
-                      : null,
-                    dataSyncDetails: followUpData.dataSyncService
-                      ? { uptime: followUpData.dataSyncService.uptime, connectedClients: followUpData.dataSyncService.connectedClients }
-                      : null,
-                  });
-                }
-              })
-              .catch(() => {});
-          }, 5000); // Re-check after 5 seconds
-        }
 
         // Re-schedule polling with appropriate interval based on current status
         scheduleNextPoll(get);

@@ -107,13 +107,16 @@ export function isAutoStartDisabled(service: ServiceName): boolean {
  * Includes retry logic: if the first attempt fails, retries up to 2 more times
  * with short delays to avoid false negatives during service startup.
  */
-export async function checkServiceHealth(service: ServiceName, retries = 2): Promise<HealthCheckResult | null> {
+export async function checkServiceHealth(service: ServiceName, retries = 0): Promise<HealthCheckResult | null> {
   const config = SERVICE_CONFIGS[service];
   
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
+      // Short timeout (2s) — these are local services on localhost,
+      // they should respond within milliseconds if running.
+      // Long timeouts block the event loop and cascade into server crashes.
+      const timeout = setTimeout(() => controller.abort(), 2000);
 
       const response = await fetch(config.healthUrl, {
         signal: controller.signal,
@@ -123,7 +126,7 @@ export async function checkServiceHealth(service: ServiceName, retries = 2): Pro
 
       if (!response.ok) {
         if (attempt < retries) {
-          await new Promise(r => setTimeout(r, 500));
+          await new Promise(r => setTimeout(r, 300));
           continue;
         }
         return null;
@@ -133,7 +136,7 @@ export async function checkServiceHealth(service: ServiceName, retries = 2): Pro
       return data;
     } catch {
       if (attempt < retries) {
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 300));
         continue;
       }
       return null;

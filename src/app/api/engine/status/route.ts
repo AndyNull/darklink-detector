@@ -9,13 +9,18 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-// Auto-start cooldown — only attempt auto-start once every 60 seconds
+// Auto-start cooldown — only attempt auto-start once every 120 seconds
 let lastAutoStartAttempt = 0;
-const AUTO_START_COOLDOWN_MS = 60000;
+const AUTO_START_COOLDOWN_MS = 120000;
 
 // Track consecutive auto-start failures per service; after MAX_RETRIES, stop trying
 const autoStartRetryCount: Record<string, number> = {};
 const MAX_AUTO_START_RETRIES = 3;
+
+// Auto-start is DISABLED in development mode because spawning child processes
+// from the Next.js dev server can cause instability (especially in sandboxed environments).
+// In production (Docker), the entrypoint script starts mini-services directly.
+const AUTO_START_ENABLED = process.env.NODE_ENV === 'production';
 
 export async function GET(request: NextRequest) {
   // Engine status is publicly viewable (read-only, no sensitive data exposed)
@@ -30,15 +35,18 @@ export async function GET(request: NextRequest) {
 
     const [scanEngineStatus, dataSyncStatus] = statusEntries;
 
-    // Auto-start offline services (with cooldown to avoid excessive restart attempts)
-    const anyOffline = scanEngineStatus[1].status === 'offline' || dataSyncStatus[1].status === 'offline';
-    const anyFailed = Object.values(autoStartRetryCount).some(c => c >= MAX_AUTO_START_RETRIES);
-    if (anyOffline && !anyFailed) {
-      const now = Date.now();
-      if (now - lastAutoStartAttempt > AUTO_START_COOLDOWN_MS) {
-        lastAutoStartAttempt = now;
-        // Fire and forget — don't block the status response
-        autoStartOfflineServices(autoStartRetryCount, MAX_AUTO_START_RETRIES).catch(() => {});
+    // Auto-start offline services — ONLY in production mode
+    // In development, use `bun run start:all` or start mini-services manually
+    if (AUTO_START_ENABLED) {
+      const anyOffline = scanEngineStatus[1].status === 'offline' || dataSyncStatus[1].status === 'offline';
+      const anyFailed = Object.values(autoStartRetryCount).some(c => c >= MAX_AUTO_START_RETRIES);
+      if (anyOffline && !anyFailed) {
+        const now = Date.now();
+        if (now - lastAutoStartAttempt > AUTO_START_COOLDOWN_MS) {
+          lastAutoStartAttempt = now;
+          // Fire and forget — don't block the status response
+          autoStartOfflineServices(autoStartRetryCount, MAX_AUTO_START_RETRIES).catch(() => {});
+        }
       }
     }
 
@@ -67,7 +75,7 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     console.error('[ENGINE] Status check error:', err);
     return NextResponse.json(
-      { error: (err as Error).message },
+      { error: '引擎状态检查失败' },
       { status: 500 }
     );
   }
