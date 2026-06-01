@@ -158,6 +158,7 @@ export function pollScanUntilComplete(
   let stopped = false;
   let lastResultCount = 0;
   let lastLogCount = 0;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
   const MAX_POLL_DURATION = 10 * 60 * 1000; // 10 minutes max
   const startTime = Date.now();
@@ -216,14 +217,20 @@ export function pollScanUntilComplete(
     }
 
     if (!stopped) {
-      setTimeout(poll, intervalMs);
+      timeoutId = setTimeout(poll, intervalMs);
     }
   };
 
-  // Start polling after a short delay
-  setTimeout(poll, 500);
+  function stop() {
+    stopped = true;
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+  }
 
-  return {
-    stop: () => { stopped = true; },
-  };
+  // Start polling after a short delay
+  timeoutId = setTimeout(poll, 500);
+
+  return { stop };
 }

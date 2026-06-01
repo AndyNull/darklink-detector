@@ -11,17 +11,27 @@ interface Props {
 interface State {
   hasError: boolean;
   error?: Error;
+  resetKey: number;
 }
 
 export class ErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, resetKey: 0 };
   }
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { hasError: true, error };
   }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo): void {
+    console.error('[ErrorBoundary] Caught error:', error);
+    console.error('[ErrorBoundary] Component stack:', info.componentStack);
+  }
+
+  handleRetry = () => {
+    this.setState((prev) => ({ hasError: false, error: undefined, resetKey: prev.resetKey + 1 }));
+  };
 
   render() {
     if (this.state.hasError) {
@@ -31,13 +41,13 @@ export class ErrorBoundary extends React.Component<Props, State> {
           <p className="text-sm">组件渲染出错</p>
           <button
             className="text-xs text-primary underline mt-1"
-            onClick={() => this.setState({ hasError: false })}
+            onClick={this.handleRetry}
           >
             重试
           </button>
         </div>
       );
     }
-    return this.props.children;
+    return <React.Fragment key={this.state.resetKey}>{this.props.children}</React.Fragment>;
   }
 }

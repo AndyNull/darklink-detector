@@ -140,6 +140,17 @@ export function registerScanPromise(taskId: string, promise: Promise<void>): voi
   });
 }
 
+/** Check if any scan task is currently running */
+export function isAnyTaskRunning(): boolean {
+  const store = getStore();
+  return store.activeScanPromises.size > 0;
+}
+
+/** Get the count of active scan tasks */
+export function getActiveTaskCount(): number {
+  return getStore().activeScanPromises.size;
+}
+
 // ─── Periodic cleanup (auto-start) ─────────────────────────────────────────────
 const globalScope = globalThis as any;
 if (!globalScope.__SCAN_TASK_CLEANUP_TIMER__) {

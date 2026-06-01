@@ -1895,3 +1895,192 @@ No changes needed.
 ### Verification
 - TypeScript compilation passes (`bunx tsc --noEmit` — no errors)
 
+---
+
+## Task 11: Fix HIGH Priority Issues from MAGI R5 Audit
+**Date**: 2025-05-31
+**Agent**: Sub-agent (Task 11)
+
+### Scope
+Fix 6 HIGH severity issues from the MAGI R5 audit: S1 (redirect SSRF bypass), D2 (SQLite busy_timeout), C1 (raw error messages in production), A1 (race condition on scan starts), F1 (ErrorBoundary missing componentDidCatch), and S2 (no HTML size limit).
+
+---
+
+### Fix 1: S1 — HTTP redirect to private IP bypasses DNS rebinding check ✅
+
+**Files**: `src/lib/scan-engine/browser-sim.ts`, `mini-services/scan-engine/browser-sim.ts`
+
+**Problem**: In `fetchWithRedirectControl`, the SSRF protection for HTTP redirects only validated DNS-resolved hostnames. When the redirect target hostname was already a literal IP address (e.g., `http://192.168.1.1/admin`), the check was skipped entirely because of the condition `if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(redirectHost))`. This allowed redirects to private IPs to bypass SSRF protection.
+
+**Changes** (applied to BOTH browser-sim.ts files):
+- Replaced the single-branch DNS check with a two-branch approach:
+  1. If redirect hostname is a literal IP → validate it directly against `validateResolvedIP()` / `validateResolvedIPInline()`
+  2. If redirect hostname is a domain → resolve via DNS and validate the resolved IP
+- This closes the SSRF bypass where `http://192.168.1.1/admin` redirects were not blocked
+
+---
+
+### Fix 2: D2 — SQLite write locking, no busy_timeout configured ✅
+
+**Files**: `src/lib/config.ts`, `src/lib/db.ts`
+
+**Problem**: Prisma with SQLite didn't have a `busy_timeout` configured, so concurrent writes would fail with SQLITE_BUSY. No WAL mode was set for concurrent read/write performance.
+
+**Changes**:
+
+`src/lib/config.ts` — `buildDatabaseUrl()`:
+- Changed SQLite URL from `file:${path}` to `file:${path}?busy_timeout=5000&connection_limit=1`
+- `busy_timeout=5000` makes SQLite wait up to 5 seconds when the database is locked
+- `connection_limit=1` ensures serialized writes to avoid concurrent write contention
+
+`src/lib/db.ts`:
+- Added `import { getEffectiveProvider } from './config'`
+- Added WAL mode initialization: `db.$executeRawUnsafe('PRAGMA journal_mode=WAL')` when using SQLite
+- WAL mode allows concurrent readers and writers, dramatically improving performance under load
+
+---
+
+### Fix 3: C1 — /api/scan/route.ts exposes raw error messages in production ✅
+
+**File**: `src/app/api/scan/route.ts`
+
+**Problem**: Error responses returned `(err as Error).message` directly, bypassing `safeErrorResponse()`. This leaked internal error details in production.
+
+**Changes**:
+- Added `import { safeErrorResponse } from '@/lib/api-error'`
+- Replaced 3 instances of `(err as Error).message` with `safeErrorResponse()`:
+  - `action=start` catch: `safeErrorResponse(err, '扫描启动失败')`
+  - `action=stop` catch: `safeErrorResponse(err, '停止扫描失败')`
+  - `action=delete` catch: `safeErrorResponse(err, '删除任务失败')`
+- `safeErrorResponse` hides error details in production, shows them in development
+
+---
+
+### Fix 4: A1 — Race condition, no guard against concurrent scan starts ✅
+
+**Files**: `src/app/api/scan/route.ts`, `src/app/api/scan/start/route.ts`, `src/lib/scan-engine/task-store.ts`
+
+**Problem**: No check whether a user already has a running scan. Double-clicking "Start Scan" would start multiple concurrent scans.
+
+**Changes**:
+
+`src/lib/scan-engine/task-store.ts`:
+- Added `isAnyTaskRunning(): boolean` — checks if `activeScanPromises.size > 0`
+- Added `getActiveTaskCount(): number` — returns count of active scan promises
+
+`src/app/api/scan/start/route.ts`:
+- Imported `isAnyTaskRunning` from task-store
+- Added guard after URL validation: if `isAnyTaskRunning()` returns true, return 409 Conflict with message "已有扫描任务正在运行"
+
+`src/app/api/scan/route.ts`:
+- Added equivalent guard in the inline `action=start` handler using `store.activeScanPromises.size > 0`
+- Returns 409 Conflict with message "已有扫描任务正在运行"
+
+---
+
+### Fix 5: F1 — ErrorBoundary missing componentDidCatch ✅
+
+**File**: `src/components/error-boundary.tsx`
+
+**Problem**: No `componentDidCatch` — errors were silently swallowed with no logging. The retry button just reset `hasError` without remounting children, so stale state could persist.
+
+**Changes**:
+- Added `componentDidCatch(error: Error, info: React.ErrorInfo)` that logs the error and component stack to `console.error()`
+- Added `resetKey` state (starts at 0, incremented on retry)
+- Changed retry handler to increment `resetKey` in addition to clearing the error state
+- Wrapped children with `<React.Fragment key={this.state.resetKey}>` to force remount on retry
+- This ensures children get a fresh lifecycle when the user clicks "重试"
+
+---
+
+### Fix 6: S2 — No HTML size limit, 10MB+ pages can exhaust memory ✅
+
+**Files**: `src/lib/scan-engine/scan-engine.ts`, `mini-services/scan-engine/scan-engine.ts`
+
+**Problem**: No limit on HTML response size before parsing with cheerio. A 10MB+ page could exhaust memory.
+
+**Changes** (applied to BOTH scan-engine files):
+
+1. Added constant `MAX_HTML_SIZE = 2 * 1024 * 1024` (2MB)
+
+2. In `analyzeHtmlResult()`:
+   - Added size check at the top: if `html.length > MAX_HTML_SIZE`, truncate to MAX_HTML_SIZE and emit a warning log
+   - Use `effectiveHtml` variable for all downstream operations (parseHtml, extractExternalResources, extractImageUrls, inlineScriptRegex, rawHtml)
+
+3. In `processUrlInner()`:
+   - After `response.text()`, added same truncation check before any processing
+   - This catches oversized HTML at the entry point before it enters the redirect/challenge logic
+
+4. Both truncation points log the original and truncated sizes for debugging
+
+---
+
+### Verification
+- TypeScript compilation passes (`bunx tsc --noEmit` — no errors)
+
+## Task 12: Fix MEDIUM Priority Issues from MAGI R5 Audit
+**Date**: 2025-05-31
+**Agent**: Sub-agent (Task 12)
+
+### Scope
+Fix 6 MEDIUM priority issues identified in the MAGI R5 audit: DNS timeout, socket reconnect, poll timeout cleanup, WebSocket input validation, Prisma graceful shutdown, and configurable CORS origins.
+
+---
+
+### Fix 1: S3 — DNS Timeout Not Configurable ✅
+**File**: `src/lib/scan-engine/dns-cache.ts`
+**Problem**: `cachedLookup()` called `dns.promises.lookup()` with no timeout. Default system DNS timeout can be 30+ seconds, causing scans to hang on unresponsive DNS servers.
+**Changes**:
+- Added `DNS_TIMEOUT_MS = 5000` constant (5-second timeout)
+- Wrapped `lookup(hostname)` in a `Promise.race` with a timeout promise that rejects with `DNS timeout for ${hostname}`
+- Added try/catch around the race to re-throw errors (timeout or DNS failures) to callers
+- Cache store only happens on successful resolution
+
+### Fix 2: F2 — Socket Never Reconnects After Server-Initiated Disconnect ✅
+**File**: `src/lib/socket.ts`
+**Problem**: When the server initiates a disconnect (`io server disconnect`), the socket.io client does NOT auto-reconnect. The old code only logged a warning.
+**Changes**:
+- Replaced the passive warning with an active reconnect attempt
+- On `io server disconnect`, logs a warning and schedules `socket.connect()` after a 2-second delay
+- Only reconnects if the socket is not already connected (guards against race conditions)
+
+### Fix 3: F3 — pollScanUntilComplete No clearTimeout on Stop ✅
+**File**: `src/lib/scan-api.ts`
+**Problem**: `pollScanUntilComplete` used `setTimeout(poll, intervalMs)` but didn't store the timeout ID. When `stop()` was called, the timer could still fire, causing unexpected polling after stop.
+**Changes**:
+- Added `timeoutId: ReturnType<typeof setTimeout> | null = null` variable
+- Store the timeout ID from both the initial `setTimeout(poll, 500)` and the recurring `setTimeout(poll, intervalMs)`
+- Converted `stop()` from an inline arrow to a named function that clears the timeout and sets it to null
+- Return `{ stop }` instead of `{ stop: () => { stopped = true; } }`
+
+### Fix 4: A4 — WebSocket Events Lack Input Validation ✅
+**File**: `mini-services/scan-engine/index.ts`
+**Problem**: The `scan:start` WebSocket event handler didn't validate `concurrency`/`timeout` values. A client could set `concurrency: 10000`, causing resource exhaustion.
+**Changes**:
+- Added input validation at the start of the `scan:start` handler:
+  - `concurrency` is clamped to range [1, 50]
+  - `timeout` is clamped to range [1000, 60000] (1–60 seconds)
+  - `urls` must be a non-empty array, otherwise emits `scan:error` and returns early
+
+### Fix 5: D3 — Prisma Connection Never Closed on Shutdown ✅
+**File**: `src/lib/db.ts`
+**Problem**: No `db.$disconnect()` call anywhere. In production, graceful shutdown should disconnect Prisma to release resources properly.
+**Changes**:
+- Added graceful shutdown handler with `db.$disconnect()` + `process.exit(0)`
+- Registers `SIGTERM` and `SIGINT` handlers
+- HMR-safe: uses `globalThis.__prisma_shutdown_registered` flag to prevent duplicate registration
+- Includes try/catch around disconnect to handle errors gracefully
+
+### Fix 6: C2 — Mini-Service CORS Hardcoded to Localhost ✅
+**Files**: `mini-services/scan-engine/index.ts`, `mini-services/data-sync-service/index.ts`
+**Problem**: `ALLOWED_ORIGINS` was hardcoded to `['http://localhost:3000', 'http://127.0.0.1:3000']`. In Docker or custom deployments, this breaks CORS for any origin other than localhost.
+**Changes** (applied to both mini-services):
+- Replaced hardcoded array with: `(process.env.CORS_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000').split(',').map(s => s.trim()).filter(Boolean)`
+- Defaults to localhost origins if `CORS_ORIGINS` env var is not set (backward compatible)
+- Supports comma-separated list of origins from the environment variable
+- Trims whitespace and filters empty strings for robustness
+
+---
+
+### Verification
+- TypeScript compilation passes (`bunx tsc --noEmit` — no errors)

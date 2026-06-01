@@ -321,11 +321,19 @@ export async function fetchWithRedirectControl(
         return { response, finalUrl: currentUrl, redirectCount };
       }
 
-      // SSRF protection: validate redirect target's DNS resolution
-      // Prevent redirects to private/reserved IPs (DNS rebinding via redirect)
+      // SSRF protection: validate redirect target against private/reserved IPs
+      // Prevents both DNS-rebinding attacks (hostname resolves to private IP) and
+      // direct redirect to private IP URLs (e.g. http://192.168.1.1/admin)
       try {
         const redirectHost = new URL(redirectUrl).hostname;
-        if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(redirectHost)) {
+        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(redirectHost)) {
+          // Redirect target hostname is already a literal IP — validate directly
+          if (!validateResolvedIPInline(redirectHost)) {
+            console.warn(`Redirect to private IP blocked: ${redirectHost}`);
+            return { response, finalUrl: currentUrl, redirectCount };
+          }
+        } else {
+          // Hostname — resolve via DNS and validate the resolved IP
           const { address } = await lookup(redirectHost);
           if (!validateResolvedIPInline(address)) {
             console.warn(`Redirect to private IP blocked: ${redirectHost} -> ${address}`);

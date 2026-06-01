@@ -132,7 +132,7 @@ function validateScanUrlConfigs(urlConfigs: UrlConfig[]): { valid: UrlConfig[]; 
 
 // ─── CORS Configuration ──────────────────────────────────────────────────────
 
-const ALLOWED_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000'];
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000').split(',').map(s => s.trim()).filter(Boolean);
 
 function setCorsHeaders(req: IncomingMessage, res: ServerResponse): void {
   const origin = req.headers.origin || '';
@@ -380,6 +380,18 @@ io.on('connection', (socket) => {
 
   socket.on('scan:start', (data: { taskId: string; request: ScanRequest }) => {
     const { taskId, request } = data;
+
+    // ── Input validation: clamp values to safe ranges ──────────────────────
+    if (request.concurrency) {
+      request.concurrency = Math.max(1, Math.min(50, request.concurrency));
+    }
+    if (request.timeout) {
+      request.timeout = Math.max(1000, Math.min(60000, request.timeout));
+    }
+    if (!Array.isArray(request.urls) || request.urls.length === 0) {
+      socket.emit('scan:error', { taskId, error: 'URL列表不能为空' });
+      return;
+    }
 
     // SSRF validation: validate all scan URLs before proceeding
     const urlValidation = validateScanUrlConfigs(request.urls);

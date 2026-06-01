@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { executeScan, stopTask, isTaskRunning } from '@/lib/scan-engine/scan-engine';
-import { addTaskResult, setTaskProgress, addTaskLog, setTaskResults, registerScanPromise } from '@/lib/scan-engine/task-store';
-import { cleanup } from '@/lib/scan-engine/task-store';
+import { addTaskResult, setTaskProgress, addTaskLog, setTaskResults, registerScanPromise, isAnyTaskRunning, cleanup } from '@/lib/scan-engine/task-store';
 import type { ScanRequest, ScanProgress, ScanResultData, LogEntry } from '@/lib/scan-engine/types';
 import { validateScanUrls } from '@/lib/security';
 import { checkRateLimit } from '@/lib/rate-limit';
@@ -41,6 +40,14 @@ export async function POST(request: NextRequest) {
 
     // Use only validated URLs
     scanRequest.urls = valid;
+
+    // Race condition guard: prevent concurrent scan starts
+    if (isAnyTaskRunning()) {
+      return NextResponse.json(
+        { error: '已有扫描任务正在运行' },
+        { status: 409 },
+      );
+    }
 
     // Cleanup old tasks periodically
     cleanup();

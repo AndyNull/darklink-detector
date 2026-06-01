@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSessionAuth } from '@/lib/api-auth';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { validateScanUrls } from '@/lib/security';
+import { safeErrorResponse } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -184,6 +185,14 @@ export async function POST(request: NextRequest) {
         // Use only validated URLs
         scanRequest.urls = valid;
 
+        // Race condition guard: prevent concurrent scan starts
+        if (store.activeScanPromises.size > 0) {
+          return NextResponse.json(
+            { error: '已有扫描任务正在运行' },
+            { status: 409 },
+          );
+        }
+
         // Cleanup old tasks
         cleanupOldTasks(store);
 
@@ -241,7 +250,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ taskId, status: 'started' }, { status: 202 });
       } catch (err) {
         console.error('[SCAN] Start error:', err);
-        return NextResponse.json({ error: (err as Error).message }, { status: 400 });
+        return safeErrorResponse(err, '扫描启动失败');
       }
     }
 
@@ -257,7 +266,7 @@ export async function POST(request: NextRequest) {
         const stopped = stopTask(taskId);
         return NextResponse.json({ taskId, stopped });
       } catch (err) {
-        return NextResponse.json({ error: (err as Error).message }, { status: 400 });
+        return safeErrorResponse(err, '停止扫描失败');
       }
     }
 
@@ -275,7 +284,7 @@ export async function POST(request: NextRequest) {
         store.taskTimestamps.delete(taskId);
         return NextResponse.json({ taskId, deleted: true });
       } catch (err) {
-        return NextResponse.json({ error: (err as Error).message }, { status: 400 });
+        return safeErrorResponse(err, '删除任务失败');
       }
     }
 

@@ -336,7 +336,7 @@ export function buildDatabaseUrl(config?: DatabaseConfig): string {
   switch (dbConfig.type) {
     case 'sqlite': {
       const path = resolve(process.cwd(), dbConfig.sqlite.path);
-      return `file:${path}`;
+      return `file:${path}?busy_timeout=5000&connection_limit=1`;
     }
 
     case 'mysql': {

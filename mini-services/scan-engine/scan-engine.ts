@@ -52,6 +52,10 @@ const MAX_DARK_LINK_DETAILS = 200;
 // Maximum HTML size to store in session cache (200KB)
 const MAX_HTML_CACHE_SIZE = 200 * 1024;
 
+// Maximum HTML size before truncation to prevent OOM (2MB)
+// Extremely large pages are truncated while still allowing regex-based detection
+const MAX_HTML_SIZE = 2 * 1024 * 1024;
+
 // Per-domain rate limiting: max concurrent requests to the same domain
 const MAX_CONCURRENT_PER_DOMAIN = 4;
 
@@ -963,8 +967,15 @@ async function analyzeHtmlResult(params: {
 }): Promise<void> {
   const { html, baseUrl, baseDomain, result, timeout, abortController, fingerprint, disabledRules, emitLog, sourceUrl } = params;
 
+  // ─── HTML size limit: truncate oversized pages to prevent OOM ────
+  let effectiveHtml = html;
+  if (html.length > MAX_HTML_SIZE) {
+    emitLog('warn', `HTML过大已截断: ${sourceUrl}`, `原始: ${html.length} 字节, 截断至: ${MAX_HTML_SIZE} 字节`);
+    effectiveHtml = html.substring(0, MAX_HTML_SIZE);
+  }
+
   // Parse HTML
-  const parsed = parseHtml(html, baseUrl, disabledRules);
+  const parsed = parseHtml(effectiveHtml, baseUrl, disabledRules);
   result.title = parsed.title;
   result.urlDetails = parsed.urlDetails;
   result.darkLinkDetails = parsed.darkLinkDetails;
@@ -975,7 +986,7 @@ async function analyzeHtmlResult(params: {
   const adaptive = getAdaptiveParams(result.responseTime || 0, timeout);
 
   // Deep scan: External JS/CSS analysis - fetch ALL resources in parallel
-  const { jsUrls, cssUrls } = extractExternalResources(html, baseUrl);
+  const { jsUrls, cssUrls } = extractExternalResources(effectiveHtml, baseUrl);
   emitLog('info', `发现外部资源: ${sourceUrl}`, `JS: ${jsUrls.length} 个, CSS: ${cssUrls.length} 个, 自适应超时: ${adaptive.externalTimeout}ms`);
 
   const jsToFetch = jsUrls.slice(0, adaptive.maxExternalJs);
@@ -998,7 +1009,7 @@ async function analyzeHtmlResult(params: {
           fingerprint
         )
       : Promise.resolve([] as Array<{ url: string; text: string }>),
-    Promise.resolve(extractImageUrls(html, baseUrl)),
+    Promise.resolve(extractImageUrls(effectiveHtml, baseUrl)),
   ]);
 
   const jsUrlSet = new Set(jsToFetch);
@@ -1093,7 +1104,7 @@ async function analyzeHtmlResult(params: {
 
   const inlineScriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
   let scriptMatch: RegExpExecArray | null;
-  while ((scriptMatch = inlineScriptRegex.exec(html)) !== null) {
+  while ((scriptMatch = inlineScriptRegex.exec(effectiveHtml)) !== null) {
     const scriptContent = scriptMatch[1];
     if (!scriptContent || scriptContent.length < 10) continue;
     const scriptUrls = extractUrlsFromJs(scriptContent, baseUrl);
@@ -1150,9 +1161,9 @@ async function analyzeHtmlResult(params: {
   trimResultArrays(result);
 
   // Update rawHtml with the final HTML
-  result.rawHtml = html.length > MAX_HTML_CACHE_SIZE
-    ? html.substring(0, MAX_HTML_CACHE_SIZE) + `\n<!-- [TRUNCATED: original ${html.length} bytes] -->`
-    : html;
+  result.rawHtml = effectiveHtml.length > MAX_HTML_CACHE_SIZE
+    ? effectiveHtml.substring(0, MAX_HTML_CACHE_SIZE) + `\n<!-- [TRUNCATED: original ${effectiveHtml.length} bytes] -->`
+    : effectiveHtml;
 }
 
 // Main scan execution
@@ -1493,6 +1504,12 @@ export async function executeScan(
       }
 
       let html = await response.text();
+
+      // ─── HTML size limit: truncate oversized pages to prevent OOM ────
+      if (html.length > MAX_HTML_SIZE) {
+        emitLog('warn', `HTML过大已截断: ${urlConfig.url}`, `原始: ${html.length} 字节, 截断至: ${MAX_HTML_SIZE} 字节`);
+        html = html.substring(0, MAX_HTML_SIZE);
+      }
 
       // Store raw HTML for source code preview (truncate to 200KB)
       result.rawHtml = html.length > MAX_HTML_CACHE_SIZE

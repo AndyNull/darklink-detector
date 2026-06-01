@@ -50,7 +50,10 @@ export function getSocket(): Socket {
 
     socket.on('disconnect', (reason) => {
       if (reason === 'io server disconnect') {
-        console.warn('Socket disconnected by server — will not auto-reconnect');
+        console.warn('[Socket] Server initiated disconnect, reconnecting in 2s...');
+        setTimeout(() => {
+          if (socket && !socket.connected) socket.connect();
+        }, 2000);
       }
       notifyStatus('disconnected');
     });

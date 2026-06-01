@@ -18,6 +18,9 @@ const DEFAULT_TTL_MS = 60_000;
 /** Maximum number of entries in the cache to prevent unbounded memory growth */
 const MAX_CACHE_SIZE = 1000;
 
+/** DNS lookup timeout in milliseconds — prevents hanging on unresponsive DNS servers */
+const DNS_TIMEOUT_MS = 5000;
+
 const cache = new Map<string, DnsCacheEntry>();
 
 // HMR-safe periodic cleanup of expired entries (every 5 minutes)
@@ -37,8 +40,10 @@ if (typeof globalThis !== 'undefined') {
 }
 
 /**
- * Resolve a hostname with caching.
+ * Resolve a hostname with caching and timeout.
  * Returns the cached result if still valid, otherwise performs a DNS lookup.
+ * DNS lookups are wrapped in a Promise.race with a configurable timeout
+ * to avoid hanging on unresponsive DNS servers (default system timeout can be 30+ seconds).
  */
 export async function cachedLookup(hostname: string, ttlMs: number = DEFAULT_TTL_MS): Promise<{ address: string; family: number }> {
   const cached = cache.get(hostname);
@@ -46,27 +51,37 @@ export async function cachedLookup(hostname: string, ttlMs: number = DEFAULT_TTL
     return { address: cached.address, family: cached.family };
   }
 
-  const result = await lookup(hostname);
-  cache.set(hostname, {
-    address: result.address,
-    family: result.family,
-    expiresAt: Date.now() + ttlMs,
-  });
+  try {
+    const result = await Promise.race([
+      lookup(hostname),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`DNS timeout for ${hostname}`)), DNS_TIMEOUT_MS)
+      ),
+    ]);
+    cache.set(hostname, {
+      address: result.address,
+      family: result.family,
+      expiresAt: Date.now() + ttlMs,
+    });
 
-  // LRU eviction: if cache exceeds max size, evict the entry closest to expiry
-  if (cache.size > MAX_CACHE_SIZE) {
-    let oldest: string | null = null;
-    let oldestExpiry = Infinity;
-    for (const [key, entry] of cache) {
-      if (entry.expiresAt < oldestExpiry) {
-        oldest = key;
-        oldestExpiry = entry.expiresAt;
+    // LRU eviction: if cache exceeds max size, evict the entry closest to expiry
+    if (cache.size > MAX_CACHE_SIZE) {
+      let oldest: string | null = null;
+      let oldestExpiry = Infinity;
+      for (const [key, entry] of cache) {
+        if (entry.expiresAt < oldestExpiry) {
+          oldest = key;
+          oldestExpiry = entry.expiresAt;
+        }
       }
+      if (oldest) cache.delete(oldest);
     }
-    if (oldest) cache.delete(oldest);
-  }
 
-  return result;
+    return result;
+  } catch (err) {
+    // On timeout or DNS error, re-throw so callers can handle it
+    throw err;
+  }
 }
 
 /**
