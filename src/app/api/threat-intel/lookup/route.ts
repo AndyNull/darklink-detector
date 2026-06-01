@@ -33,9 +33,23 @@ interface LookupResult {
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────────
 
+// Bounded by the number of configured sources (currently 3: virustotal, abuseipdb, threatbook).
+// Periodic cleanup removes entries older than 5 minutes to prevent stale accumulation.
 const lastQueryTime = new Map<string, number>();
 const MIN_QUERY_INTERVAL_MS = 15_000; // 15 seconds between same-source queries
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const LAST_QUERY_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const LAST_QUERY_MAX_AGE = 5 * 60 * 1000; // 5 minutes
+
+// Periodic cleanup of stale rate-limit entries
+setInterval(() => {
+  const now = Date.now();
+  for (const [source, timestamp] of lastQueryTime) {
+    if (now - timestamp > LAST_QUERY_MAX_AGE) {
+      lastQueryTime.delete(source);
+    }
+  }
+}, LAST_QUERY_CLEANUP_INTERVAL);
 
 function checkRateLimit(source: string): { allowed: boolean; retryAfterMs: number } {
   const lastTime = lastQueryTime.get(source) || 0;

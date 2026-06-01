@@ -244,10 +244,11 @@ async function queryThreatBookIP(ip: string): Promise<{
     const json = await response.json();
 
     if (json.response_code !== 0) {
+      console.error('[ThreatBook] IP query error:', json.verbose_msg, 'code:', json.response_code);
       return {
         success: false,
         status: 'error',
-        error: json.verbose_msg || `ThreatBook error code: ${json.response_code}`,
+        error: `ThreatBook API error (code: ${json.response_code})`,
       };
     }
 
@@ -335,10 +336,11 @@ async function queryThreatBookDomain(domain: string): Promise<{
     const json = await response.json();
 
     if (json.response_code !== 0) {
+      console.error('[ThreatBook] Domain query error:', json.verbose_msg, 'code:', json.response_code);
       return {
         success: false,
         status: 'error',
-        error: json.verbose_msg || `ThreatBook error code: ${json.response_code}`,
+        error: `ThreatBook API error (code: ${json.response_code})`,
       };
     }
 

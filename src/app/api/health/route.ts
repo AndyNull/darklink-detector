@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { APP_VERSION } from '@/lib/version';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,6 +54,7 @@ export async function GET() {
 
   return NextResponse.json({
     status: overallStatus,
+    version: APP_VERSION,
     activeTasks,
     uptime: Math.floor(process.uptime()),
     engine: 'integrated',

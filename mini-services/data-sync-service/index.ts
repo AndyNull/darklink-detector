@@ -43,7 +43,8 @@ let cachedSyncTasks: any[] = [];
 let cachedSchedule: any = null;
 let cachedMaliciousStats = { domainCount: 0, ipCount: 0 };
 
-// Malicious entries cache — keyed by "type:page:pageSize:search"
+// Malicious entries cache — keyed by "type:page:pageSize:search" (search truncated to 100 chars)
+const MAX_CACHE_ENTRIES = 1000;
 let cachedMaliciousEntries: Map<string, { data: any; timestamp: number }> = new Map();
 const MALICIOUS_ENTRIES_CACHE_TTL = 15_000; // 15 seconds
 
@@ -197,6 +198,21 @@ function queryMaliciousStats(): { domainCount: number; ipCount: number } {
 }
 
 /**
+ * Evict oldest cache entries when the cache exceeds MAX_CACHE_ENTRIES.
+ * Uses LRU eviction: removes the oldest 10% of entries (first inserted).
+ */
+function evictCacheIfNeeded(): void {
+  if (cachedMaliciousEntries.size < MAX_CACHE_ENTRIES) return;
+  const evictCount = Math.floor(MAX_CACHE_ENTRIES * 0.1);
+  let evicted = 0;
+  for (const key of cachedMaliciousEntries.keys()) {
+    if (evicted >= evictCount) break;
+    cachedMaliciousEntries.delete(key);
+    evicted++;
+  }
+}
+
+/**
  * Query paginated malicious entries (domain or IP).
  * Results are cached for MALICIOUS_ENTRIES_CACHE_TTL to avoid hitting the DB on every request.
  */
@@ -206,7 +222,8 @@ function queryMaliciousEntries(
   pageSize: number = 50,
   search: string = '',
 ): { items: any[]; total: number; page: number; pageSize: number } {
-  const cacheKey = `${type}:${page}:${pageSize}:${search}`;
+  const truncatedSearch = search.slice(0, 100);
+  const cacheKey = `${type}:${page}:${pageSize}:${truncatedSearch}`;
 
   // Check cache
   const cached = cachedMaliciousEntries.get(cacheKey);
@@ -243,6 +260,7 @@ function queryMaliciousEntries(
       const total = countRow?.count || 0;
 
       const result = { items, total, page, pageSize };
+      evictCacheIfNeeded();
       cachedMaliciousEntries.set(cacheKey, { data: result, timestamp: Date.now() });
       return result;
     } else {
@@ -270,6 +288,7 @@ function queryMaliciousEntries(
       const total = countRow?.count || 0;
 
       const result = { items, total, page, pageSize };
+      evictCacheIfNeeded();
       cachedMaliciousEntries.set(cacheKey, { data: result, timestamp: Date.now() });
       return result;
     }
@@ -344,10 +363,26 @@ function checkAndPushChanges() {
 
 // ─── HTTP Server ─────────────────────────────────────────────────────────────
 
-const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+// ─── CORS Configuration ──────────────────────────────────────────────────────
+
+const ALLOWED_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000'];
+
+function setCorsHeaders(req: IncomingMessage, res: ServerResponse): void {
+  const origin = req.headers.origin || '';
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  } else {
+    // No CORS header = browser blocks the request from unauthorized origins
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
+const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  // CORS headers — restricted to allowed origins only
+  setCorsHeaders(req, res);
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
@@ -421,7 +456,7 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
 
 const io = new Server(httpServer, {
   cors: {
-    origin: '*',
+    origin: ALLOWED_ORIGINS,
     methods: ['GET', 'POST'],
   },
   pingTimeout: 60000,

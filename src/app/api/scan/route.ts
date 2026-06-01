@@ -201,11 +201,15 @@ export async function POST(request: NextRequest) {
         };
 
         const onResult = (result: any) => {
-          store.taskResults.set(taskId, [...(store.taskResults.get(taskId) || []), result]);
+          const existing = store.taskResults.get(taskId) || [];
+          existing.push(result);
+          store.taskResults.set(taskId, existing);
         };
 
         const onLog = (log: any) => {
-          store.taskLogs.set(taskId, [...(store.taskLogs.get(taskId) || []), log]);
+          const existing = store.taskLogs.get(taskId) || [];
+          existing.push(log);
+          store.taskLogs.set(taskId, existing);
         };
 
         // Run scan in a separate microtask to decouple from request lifecycle
@@ -243,6 +247,8 @@ export async function POST(request: NextRequest) {
 
     case 'stop': {
       try {
+        const sessionError = requireSessionAuth(request);
+        if (sessionError) return sessionError;
         const { taskId } = await request.json();
         if (!taskId) {
           return NextResponse.json({ error: 'Missing taskId' }, { status: 400 });

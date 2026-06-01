@@ -114,299 +114,194 @@ export async function POST(request: NextRequest) {
     }
 
     const results: Record<string, { imported: number; errors: number }> = {};
+    const BATCH_SIZE = 500;
+
+    // Helper: batch-insert records using createMany with skipDuplicates.
+    // Falls back to sequential insert on batch failure to maximise successful imports.
+    async function batchCreateMany(
+      tableName: string,
+      records: Record<string, unknown>[],
+      mapRecord: (r: Record<string, unknown>) => any,
+    ): Promise<{ imported: number; errors: number }> {
+      if (records.length === 0) return { imported: 0, errors: 0 };
+
+      let imported = 0;
+      let errors = 0;
+      const model = (db as any)[tableName];
+
+      // Try createMany with skipDuplicates in batches
+      for (let i = 0; i < records.length; i += BATCH_SIZE) {
+        const batch = records.slice(i, i + BATCH_SIZE);
+        try {
+          const data = batch.map(mapRecord);
+          const result = await model.createMany({ data, skipDuplicates: true });
+          imported += result.count;
+        } catch {
+          // Batch failed — fall back to individual inserts for this batch
+          for (const record of batch) {
+            try {
+              await model.create({ data: mapRecord(record) });
+              imported++;
+            } catch {
+              errors++;
+            }
+          }
+        }
+      }
+      return { imported, errors };
+    }
 
     // Import ScanTasks first (they are referenced by ScanResults and ScanLogs)
     if (body.tables.ScanTask && Array.isArray(body.tables.ScanTask)) {
-      let imported = 0;
-      let errors = 0;
-      for (const item of body.tables.ScanTask) {
-        try {
-          const record = item as Record<string, unknown>;
-          await db.scanTask.upsert({
-            where: { id: record.id as string },
-            update: {},
-            create: {
-              id: record.id as string,
-              name: (record.name as string) || '未命名任务',
-              status: (record.status as string) || 'pending',
-              totalUrls: (record.totalUrls as number) || 0,
-              completedUrls: (record.completedUrls as number) || 0,
-              progress: (record.progress as number) || 0,
-              concurrency: (record.concurrency as number) || 10,
-              timeout: (record.timeout as number) || 10000,
-              createdAt: record.createdAt ? new Date(record.createdAt as string) : new Date(),
-              updatedAt: record.updatedAt ? new Date(record.updatedAt as string) : new Date(),
-            },
-          });
-          imported++;
-        } catch {
-          errors++;
-        }
-      }
-      results.ScanTask = { imported, errors };
+      const records = body.tables.ScanTask as Record<string, unknown>[];
+      results.ScanTask = await batchCreateMany('scanTask', records, (r) => ({
+        id: r.id as string,
+        name: (r.name as string) || '未命名任务',
+        status: (r.status as string) || 'pending',
+        totalUrls: (r.totalUrls as number) || 0,
+        completedUrls: (r.completedUrls as number) || 0,
+        progress: (r.progress as number) || 0,
+        concurrency: (r.concurrency as number) || 10,
+        timeout: (r.timeout as number) || 10000,
+        createdAt: r.createdAt ? new Date(r.createdAt as string) : new Date(),
+        updatedAt: r.updatedAt ? new Date(r.updatedAt as string) : new Date(),
+      }));
     }
 
     // Import ScanResults (referenced by UrlDetail, DarkLink, QrCodeResult)
     if (body.tables.ScanResult && Array.isArray(body.tables.ScanResult)) {
-      let imported = 0;
-      let errors = 0;
-      for (const item of body.tables.ScanResult) {
-        try {
-          const record = item as Record<string, unknown>;
-          await db.scanResult.upsert({
-            where: { id: record.id as string },
-            update: {},
-            create: {
-              id: record.id as string,
-              taskId: record.taskId as string,
-              url: record.url as string,
-              method: (record.method as string) || 'GET',
-              statusCode: record.statusCode as number | null,
-              responseTime: record.responseTime as number | null,
-              title: record.title as string | null,
-              extractedUrls: (record.extractedUrls as number) || 0,
-              darkLinks: (record.darkLinks as number) || 0,
-              qrCodes: (record.qrCodes as number) || 0,
-              status: (record.status as string) || 'pending',
-              errorMessage: record.errorMessage as string | null,
-              rawHtml: record.rawHtml as string | null,
-              createdAt: record.createdAt ? new Date(record.createdAt as string) : new Date(),
-              updatedAt: record.updatedAt ? new Date(record.updatedAt as string) : new Date(),
-            },
-          });
-          imported++;
-        } catch {
-          errors++;
-        }
-      }
-      results.ScanResult = { imported, errors };
+      const records = body.tables.ScanResult as Record<string, unknown>[];
+      results.ScanResult = await batchCreateMany('scanResult', records, (r) => ({
+        id: r.id as string,
+        taskId: r.taskId as string,
+        url: r.url as string,
+        method: (r.method as string) || 'GET',
+        statusCode: r.statusCode as number | null,
+        responseTime: r.responseTime as number | null,
+        title: r.title as string | null,
+        extractedUrls: (r.extractedUrls as number) || 0,
+        darkLinks: (r.darkLinks as number) || 0,
+        qrCodes: (r.qrCodes as number) || 0,
+        status: (r.status as string) || 'pending',
+        errorMessage: r.errorMessage as string | null,
+        rawHtml: r.rawHtml as string | null,
+        createdAt: r.createdAt ? new Date(r.createdAt as string) : new Date(),
+        updatedAt: r.updatedAt ? new Date(r.updatedAt as string) : new Date(),
+      }));
     }
 
     // Import UrlDetails
     if (body.tables.UrlDetail && Array.isArray(body.tables.UrlDetail)) {
-      let imported = 0;
-      let errors = 0;
-      for (const item of body.tables.UrlDetail) {
-        try {
-          const record = item as Record<string, unknown>;
-          await db.urlDetail.upsert({
-            where: { id: record.id as string },
-            update: {},
-            create: {
-              id: record.id as string,
-              resultId: record.resultId as string,
-              url: record.url as string,
-              tag: record.tag as string | null,
-              attribute: record.attribute as string | null,
-              text: record.text as string | null,
-              isExternal: (record.isExternal as boolean) || false,
-              domain: record.domain as string | null,
-              isVisible: record.isVisible !== undefined ? record.isVisible as boolean : true,
-              hideReason: record.hideReason as string | null,
-              createdAt: record.createdAt ? new Date(record.createdAt as string) : new Date(),
-            },
-          });
-          imported++;
-        } catch {
-          errors++;
-        }
-      }
-      results.UrlDetail = { imported, errors };
+      const records = body.tables.UrlDetail as Record<string, unknown>[];
+      results.UrlDetail = await batchCreateMany('urlDetail', records, (r) => ({
+        id: r.id as string,
+        resultId: r.resultId as string,
+        url: r.url as string,
+        tag: r.tag as string | null,
+        attribute: r.attribute as string | null,
+        text: r.text as string | null,
+        isExternal: (r.isExternal as boolean) || false,
+        domain: r.domain as string | null,
+        isVisible: r.isVisible !== undefined ? r.isVisible as boolean : true,
+        hideReason: r.hideReason as string | null,
+        createdAt: r.createdAt ? new Date(r.createdAt as string) : new Date(),
+      }));
     }
 
     // Import DarkLinks
     if (body.tables.DarkLink && Array.isArray(body.tables.DarkLink)) {
-      let imported = 0;
-      let errors = 0;
-      for (const item of body.tables.DarkLink) {
-        try {
-          const record = item as Record<string, unknown>;
-          await db.darkLink.upsert({
-            where: { id: record.id as string },
-            update: {},
-            create: {
-              id: record.id as string,
-              resultId: record.resultId as string,
-              url: record.url as string,
-              tag: record.tag as string | null,
-              text: record.text as string | null,
-              type: record.type as string,
-              severity: (record.severity as string) || 'medium',
-              description: record.description as string | null,
-              evidence: record.evidence as string | null,
-              createdAt: record.createdAt ? new Date(record.createdAt as string) : new Date(),
-            },
-          });
-          imported++;
-        } catch {
-          errors++;
-        }
-      }
-      results.DarkLink = { imported, errors };
+      const records = body.tables.DarkLink as Record<string, unknown>[];
+      results.DarkLink = await batchCreateMany('darkLink', records, (r) => ({
+        id: r.id as string,
+        resultId: r.resultId as string,
+        url: r.url as string,
+        tag: r.tag as string | null,
+        text: r.text as string | null,
+        type: r.type as string,
+        severity: (r.severity as string) || 'medium',
+        description: r.description as string | null,
+        evidence: r.evidence as string | null,
+        createdAt: r.createdAt ? new Date(r.createdAt as string) : new Date(),
+      }));
     }
 
     // Import QrCodeResults
     if (body.tables.QrCodeResult && Array.isArray(body.tables.QrCodeResult)) {
-      let imported = 0;
-      let errors = 0;
-      for (const item of body.tables.QrCodeResult) {
-        try {
-          const record = item as Record<string, unknown>;
-          await db.qrCodeResult.upsert({
-            where: { id: record.id as string },
-            update: {},
-            create: {
-              id: record.id as string,
-              resultId: record.resultId as string,
-              sourceUrl: record.sourceUrl as string | null,
-              decodedText: record.decodedText as string,
-              isSuspicious: (record.isSuspicious as boolean) || false,
-              reason: record.reason as string | null,
-              createdAt: record.createdAt ? new Date(record.createdAt as string) : new Date(),
-            },
-          });
-          imported++;
-        } catch {
-          errors++;
-        }
-      }
-      results.QrCodeResult = { imported, errors };
+      const records = body.tables.QrCodeResult as Record<string, unknown>[];
+      results.QrCodeResult = await batchCreateMany('qrCodeResult', records, (r) => ({
+        id: r.id as string,
+        resultId: r.resultId as string,
+        sourceUrl: r.sourceUrl as string | null,
+        decodedText: r.decodedText as string,
+        isSuspicious: (r.isSuspicious as boolean) || false,
+        reason: r.reason as string | null,
+        createdAt: r.createdAt ? new Date(r.createdAt as string) : new Date(),
+      }));
     }
 
     // Import ScanLogs
     if (body.tables.ScanLog && Array.isArray(body.tables.ScanLog)) {
-      let imported = 0;
-      let errors = 0;
-      for (const item of body.tables.ScanLog) {
-        try {
-          const record = item as Record<string, unknown>;
-          await db.scanLog.upsert({
-            where: { id: record.id as string },
-            update: {},
-            create: {
-              id: record.id as string,
-              taskId: record.taskId as string,
-              level: (record.level as string) || 'info',
-              message: record.message as string,
-              detail: record.detail as string | null,
-              createdAt: record.createdAt ? new Date(record.createdAt as string) : new Date(),
-            },
-          });
-          imported++;
-        } catch {
-          errors++;
-        }
-      }
-      results.ScanLog = { imported, errors };
+      const records = body.tables.ScanLog as Record<string, unknown>[];
+      results.ScanLog = await batchCreateMany('scanLog', records, (r) => ({
+        id: r.id as string,
+        taskId: r.taskId as string,
+        level: (r.level as string) || 'info',
+        message: r.message as string,
+        detail: r.detail as string | null,
+        createdAt: r.createdAt ? new Date(r.createdAt as string) : new Date(),
+      }));
     }
 
     // Import MaliciousDomains
     if (body.tables.MaliciousDomain && Array.isArray(body.tables.MaliciousDomain)) {
-      let imported = 0;
-      let errors = 0;
-      for (const item of body.tables.MaliciousDomain) {
-        try {
-          const record = item as Record<string, unknown>;
-          await db.maliciousDomain.upsert({
-            where: { id: record.id as string },
-            update: {},
-            create: {
-              id: record.id as string,
-              domain: record.domain as string,
-              reason: record.reason as string | null,
-              source: (record.source as string) || 'manual',
-              severity: (record.severity as string) || 'high',
-              category: record.category as string | null,
-              createdAt: record.createdAt ? new Date(record.createdAt as string) : new Date(),
-              updatedAt: record.updatedAt ? new Date(record.updatedAt as string) : new Date(),
-            },
-          });
-          imported++;
-        } catch {
-          errors++;
-        }
-      }
-      results.MaliciousDomain = { imported, errors };
+      const records = body.tables.MaliciousDomain as Record<string, unknown>[];
+      results.MaliciousDomain = await batchCreateMany('maliciousDomain', records, (r) => ({
+        id: r.id as string,
+        domain: r.domain as string,
+        reason: r.reason as string | null,
+        source: (r.source as string) || 'manual',
+        severity: (r.severity as string) || 'high',
+        category: r.category as string | null,
+        createdAt: r.createdAt ? new Date(r.createdAt as string) : new Date(),
+        updatedAt: r.updatedAt ? new Date(r.updatedAt as string) : new Date(),
+      }));
     }
 
     // Import MaliciousIPs
     if (body.tables.MaliciousIP && Array.isArray(body.tables.MaliciousIP)) {
-      let imported = 0;
-      let errors = 0;
-      for (const item of body.tables.MaliciousIP) {
-        try {
-          const record = item as Record<string, unknown>;
-          await db.maliciousIP.upsert({
-            where: { id: record.id as string },
-            update: {},
-            create: {
-              id: record.id as string,
-              ip: record.ip as string,
-              reason: record.reason as string | null,
-              source: (record.source as string) || 'manual',
-              severity: (record.severity as string) || 'high',
-              category: record.category as string | null,
-              country: record.country as string | null,
-              createdAt: record.createdAt ? new Date(record.createdAt as string) : new Date(),
-              updatedAt: record.updatedAt ? new Date(record.updatedAt as string) : new Date(),
-            },
-          });
-          imported++;
-        } catch {
-          errors++;
-        }
-      }
-      results.MaliciousIP = { imported, errors };
+      const records = body.tables.MaliciousIP as Record<string, unknown>[];
+      results.MaliciousIP = await batchCreateMany('maliciousIP', records, (r) => ({
+        id: r.id as string,
+        ip: r.ip as string,
+        reason: r.reason as string | null,
+        source: (r.source as string) || 'manual',
+        severity: (r.severity as string) || 'high',
+        category: r.category as string | null,
+        country: r.country as string | null,
+        createdAt: r.createdAt ? new Date(r.createdAt as string) : new Date(),
+        updatedAt: r.updatedAt ? new Date(r.updatedAt as string) : new Date(),
+      }));
     }
 
     // Import UpdateSchedules
     if (body.tables.UpdateSchedule && Array.isArray(body.tables.UpdateSchedule)) {
-      let imported = 0;
-      let errors = 0;
-      for (const item of body.tables.UpdateSchedule) {
-        try {
-          const record = item as Record<string, unknown>;
-          await db.updateSchedule.upsert({
-            where: { id: record.id as string },
-            update: {},
-            create: {
-              id: record.id as string,
-              enabled: (record.enabled as boolean) || false,
-              frequency: (record.frequency as string) || 'daily',
-              lastRunAt: record.lastRunAt ? new Date(record.lastRunAt as string) : null,
-              nextRunAt: record.nextRunAt ? new Date(record.nextRunAt as string) : null,
-              status: (record.status as string) || 'idle',
-              createdAt: record.createdAt ? new Date(record.createdAt as string) : new Date(),
-              updatedAt: record.updatedAt ? new Date(record.updatedAt as string) : new Date(),
-            },
-          });
-          imported++;
-        } catch {
-          errors++;
-        }
-      }
-      results.UpdateSchedule = { imported, errors };
+      const records = body.tables.UpdateSchedule as Record<string, unknown>[];
+      results.UpdateSchedule = await batchCreateMany('updateSchedule', records, (r) => ({
+        id: r.id as string,
+        enabled: (r.enabled as boolean) || false,
+        frequency: (r.frequency as string) || 'daily',
+        lastRunAt: r.lastRunAt ? new Date(r.lastRunAt as string) : null,
+        nextRunAt: r.nextRunAt ? new Date(r.nextRunAt as string) : null,
+        status: (r.status as string) || 'idle',
+        createdAt: r.createdAt ? new Date(r.createdAt as string) : new Date(),
+        updatedAt: r.updatedAt ? new Date(r.updatedAt as string) : new Date(),
+      }));
     }
 
-    // Import ThreatIntelEntries if they exist - sanitize fields to prevent arbitrary field injection
+    // Import ThreatIntelEntries — sanitize fields to prevent arbitrary field injection
     if (body.tables.ThreatIntelEntry && Array.isArray(body.tables.ThreatIntelEntry)) {
-      let imported = 0;
-      let errors = 0;
-      for (const item of body.tables.ThreatIntelEntry) {
-        try {
-          const record = item as Record<string, unknown>;
-          const sanitized = sanitizeThreatIntelRecord(record);
-          await (db as any).threatIntelEntry.upsert({
-            where: { id: sanitized.id as string },
-            update: {},
-            create: sanitized,
-          });
-          imported++;
-        } catch {
-          errors++;
-        }
-      }
-      results.ThreatIntelEntry = { imported, errors };
+      const records = (body.tables.ThreatIntelEntry as Record<string, unknown>[]).map(sanitizeThreatIntelRecord);
+      results.ThreatIntelEntry = await batchCreateMany('threatIntelEntry', records, (r) => r);
     }
 
     // Calculate totals

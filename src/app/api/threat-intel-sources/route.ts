@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireSessionAuth } from '@/lib/api-auth';
 import { rsaDecrypt, getSessionFromRequest } from '@/lib/server-config';
+import { encrypt, decrypt, isEncrypted } from '@/lib/crypto-server';
 import { auditLog } from '@/lib/audit-logger';
 
 // --- Constants ---
@@ -176,31 +177,34 @@ const DEFAULT_SOURCES = [
 /**
  * Run async tasks with a controlled concurrency limit.
  * Returns all results as PromiseSettledResult<T>[], preserving order.
+ *
+ * Uses a Set-based approach where each promise self-removes from the
+ * executing set via .finally(), avoiding the race condition where
+ * Promise.resolve(false) always wins the race over .then() microtasks.
  */
 async function parallelWithLimit<T>(
   tasks: (() => Promise<T>)[],
   limit: number = 3
 ): Promise<PromiseSettledResult<T>[]> {
   const results: PromiseSettledResult<T>[] = new Array(tasks.length);
-  const executing: Promise<void>[] = [];
+  const executing = new Set<Promise<void>>();
 
   for (let i = 0; i < tasks.length; i++) {
     const taskIndex = i;
-    const p = tasks[taskIndex]().then(
-      (value) => { results[taskIndex] = { status: 'fulfilled', value }; },
-      (reason) => { results[taskIndex] = { status: 'rejected', reason }; }
-    );
-    executing.push(p);
+    // Chain .then() for result capture, then .finally() for self-removal.
+    // The .finally() callback closes over `p` which is assigned below;
+    // this is safe because the callback only runs after the promise settles,
+    // which is always after the assignment completes.
+    const p = tasks[taskIndex]()
+      .then(
+        (value) => { results[taskIndex] = { status: 'fulfilled', value }; },
+        (reason) => { results[taskIndex] = { status: 'rejected', reason }; }
+      )
+      .finally(() => executing.delete(p));
+    executing.add(p);
 
-    if (executing.length >= limit) {
+    if (executing.size >= limit) {
       await Promise.race(executing);
-      // Remove completed promises from the executing list
-      for (let j = executing.length - 1; j >= 0; j--) {
-        const settled = await Promise.race([executing[j].then(() => true, () => true), Promise.resolve(false)]);
-        if (settled) {
-          executing.splice(j, 1);
-        }
-      }
     }
   }
   await Promise.all(executing);
@@ -1097,6 +1101,16 @@ export async function GET(request: NextRequest) {
         enabled: s.enabled,
         requiresApiKey: s.requiresApiKey,
         hasApiKey: !!s.apiKey,
+        apiKeyMasked: s.apiKey
+          ? (() => {
+              try {
+                const plain = isEncrypted(s.apiKey) ? decrypt(s.apiKey) : s.apiKey;
+                return plain.length > 4 ? '****' + plain.slice(-4) : '****';
+              } catch {
+                return '****';
+              }
+            })()
+          : null,
         status: s.status,
         lastUpdate: s.lastUpdate?.toISOString() || null,
         entryCount: s.entryCount,
@@ -1143,9 +1157,10 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // Encrypt the API key before storing (AES-256-GCM)
       await db.threatIntelSource.update({
         where: { sourceId },
-        data: { apiKey: decryptedApiKey || null },
+        data: { apiKey: decryptedApiKey ? encrypt(decryptedApiKey) : null },
       });
 
       auditLog.system('api_key_saved', actor, { sourceId }, ip, 'threat_intel_source', sourceId);
@@ -1193,7 +1208,17 @@ export async function POST(request: NextRequest) {
       }
 
       // For sources requiring API key, check if one is stored
-      const sourceApiKey = source.apiKey || apiKey;
+      // Decrypt stored API key if it was encrypted by crypto-server
+      let sourceApiKey: string | undefined;
+      if (source.apiKey) {
+        try {
+          sourceApiKey = isEncrypted(source.apiKey) ? decrypt(source.apiKey) : source.apiKey;
+        } catch {
+          // Legacy plaintext key — use as-is
+          sourceApiKey = source.apiKey;
+        }
+      }
+      sourceApiKey = sourceApiKey || apiKey;
       if (source.requiresApiKey && !sourceApiKey) {
         return NextResponse.json(
           { error: '该情报源需要API密钥，请在设置中配置API Key' },
@@ -1249,7 +1274,17 @@ export async function POST(request: NextRequest) {
       // Run collection in background with concurrency limit of 3 using Promise.allSettled
       const CONCURRENCY_LIMIT = 3;
       const sourceQueue = allSources.map((source) => {
-        const effectiveApiKey = source.apiKey || (source.sourceId === 'alienvault-otx' ? process.env.OTX_API_KEY : undefined);
+        // Decrypt stored API key if it was encrypted by crypto-server
+        let decryptedSourceKey: string | undefined;
+        if (source.apiKey) {
+          try {
+            decryptedSourceKey = isEncrypted(source.apiKey) ? decrypt(source.apiKey) : source.apiKey;
+          } catch {
+            // Legacy plaintext key — use as-is
+            decryptedSourceKey = source.apiKey;
+          }
+        }
+        const effectiveApiKey = decryptedSourceKey || (source.sourceId === 'alienvault-otx' ? process.env.OTX_API_KEY : undefined);
         return () => collectSource(source.sourceId, effectiveApiKey);
       });
 

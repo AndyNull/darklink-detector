@@ -21,8 +21,9 @@ export async function GET(
     }
     return NextResponse.json({ task });
   } catch (err: any) {
+    console.error('[sync-tasks] Failed to get task:', err);
     return NextResponse.json(
-      { error: 'Failed to get task', detail: err.message },
+      { error: '操作失败，请稍后重试' },
       { status: 500 },
     );
   }
@@ -68,8 +69,9 @@ export async function PATCH(
     const status = err.message?.includes('not found') ? 404
       : err.message?.includes('cannot') ? 409
       : 500;
+    console.error('[sync-tasks] Failed to control task:', err);
     return NextResponse.json(
-      { error: err.message || 'Failed to control task' },
+      { error: '操作失败，请稍后重试' },
       { status },
     );
   }
@@ -92,8 +94,9 @@ export async function DELETE(
     }
     return NextResponse.json({ message: 'Task deleted' });
   } catch (err: any) {
+    console.error('[sync-tasks] Failed to delete task:', err);
     return NextResponse.json(
-      { error: 'Failed to delete task', detail: err.message },
+      { error: '操作失败，请稍后重试' },
       { status: 500 },
     );
   }

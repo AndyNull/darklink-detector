@@ -156,6 +156,7 @@ export interface LogFilter {
   search?: string;    // Search within details/action
   limit?: number;     // Max entries to return (default 500, max 2000)
   offset?: number;    // Offset for pagination
+  maxLines?: number;  // Max lines to read from file (tail behavior, default 500)
   entityType?: string; // Filter by entity type
   entityId?: string;   // Filter by entity ID
 }
@@ -171,7 +172,7 @@ export interface LogReadResult {
  * Reads from the end of the file (most recent first) for efficiency.
  */
 export async function readLogs(filter: LogFilter = {}): Promise<LogReadResult[]> {
-  const { category, startDate, endDate, search, limit = 500, offset = 0, entityType, entityId } = filter;
+  const { category, startDate, endDate, search, limit = 500, offset = 0, maxLines = 500, entityType, entityId } = filter;
   const maxLimit = Math.min(limit, 2000);
 
   await ensureLogsDir();
@@ -190,7 +191,12 @@ export async function readLogs(filter: LogFilter = {}): Promise<LogReadResult[]>
     try {
       const { readFile } = await import('fs/promises');
       const content = await readFile(logFile, 'utf-8');
-      const lines = content.trim().split('\n').filter(l => l.trim());
+      const allLines = content.trim().split('\n').filter(l => l.trim());
+
+      // Tail behavior: only process the last maxLines lines to limit memory usage
+      const lines = allLines.length > maxLines
+        ? allLines.slice(allLines.length - maxLines)
+        : allLines;
 
       let entries: LogEntry[] = [];
       let total = 0;

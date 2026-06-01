@@ -110,15 +110,26 @@ async function initInterruptedTasks(): Promise<void> {
     }
 
     // 3. Recalculate entryCount for all sources (fix inaccurate counts)
+    // Use bulk groupBy queries instead of per-source queries (3N+1 → 4 total)
     const allSources = await db.threatIntelSource.findMany();
     let fixedCount = 0;
-    for (const source of allSources) {
-      try {
-        const [domainCount, ipCount, entryCount] = await Promise.all([
-          db.maliciousDomain.count({ where: { source: source.sourceId } }),
-          db.maliciousIP.count({ where: { source: source.sourceId } }),
-          db.threatIntelEntry.count({ where: { sourceId: source.sourceId } }),
-        ]);
+
+    try {
+      const [domainCounts, ipCounts, entryCounts] = await Promise.all([
+        db.maliciousDomain.groupBy({ by: ['source'], _count: { id: true } }),
+        db.maliciousIP.groupBy({ by: ['source'], _count: { id: true } }),
+        db.threatIntelEntry.groupBy({ by: ['sourceId'], _count: { id: true } }),
+      ]);
+
+      // Build lookup maps from aggregated results
+      const domainMap = new Map(domainCounts.map((r: any) => [r.source, r._count.id]));
+      const ipMap = new Map(ipCounts.map((r: any) => [r.source, r._count.id]));
+      const entryMap = new Map(entryCounts.map((r: any) => [r.sourceId, r._count.id]));
+
+      for (const source of allSources) {
+        const domainCount = domainMap.get(source.sourceId) || 0;
+        const ipCount = ipMap.get(source.sourceId) || 0;
+        const entryCount = entryMap.get(source.sourceId) || 0;
         const totalCount = domainCount + ipCount + entryCount;
         if (source.entryCount !== totalCount) {
           await db.threatIntelSource.update({
@@ -127,10 +138,11 @@ async function initInterruptedTasks(): Promise<void> {
           });
           fixedCount++;
         }
-      } catch {
-        // Skip sources that fail to count
       }
+    } catch {
+      // Skip recalculation if groupBy queries fail
     }
+
     if (fixedCount > 0) {
       console.log(`[SyncTaskManager] Fixed entryCount for ${fixedCount} source(s)`);
     }
