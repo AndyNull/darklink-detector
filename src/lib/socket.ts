@@ -42,13 +42,56 @@ export function getSocket(): Socket {
 
     let errorCount = 0;
 
+    // ─── Heartbeat mechanism ──────────────────────────────────────────────────
+    // Send a heartbeat ping every 25s to detect dead connections early.
+    // If no pong is received within 10s, the connection is considered dead.
+    let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+    let heartbeatTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    function startHeartbeat() {
+      stopHeartbeat();
+      heartbeatInterval = setInterval(() => {
+        if (socket?.connected) {
+          // Set a timeout to detect missing pong
+          heartbeatTimeout = setTimeout(() => {
+            console.warn('[Socket] Heartbeat timeout — no pong received, connection may be dead');
+            // Force reconnect if no pong received
+            socket?.disconnect();
+            socket?.connect();
+          }, 10_000);
+          socket.emit('ping');
+        }
+      }, 25_000);
+    }
+
+    function stopHeartbeat() {
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+      }
+      if (heartbeatTimeout) {
+        clearTimeout(heartbeatTimeout);
+        heartbeatTimeout = null;
+      }
+    }
+
     socket.on('connect', () => {
       errorCount = 0;
       console.log('Socket connected:', socket?.id);
       notifyStatus('connected');
+      startHeartbeat();
+    });
+
+    socket.on('pong', () => {
+      // Connection is alive — clear the heartbeat timeout
+      if (heartbeatTimeout) {
+        clearTimeout(heartbeatTimeout);
+        heartbeatTimeout = null;
+      }
     });
 
     socket.on('disconnect', (reason) => {
+      stopHeartbeat();
       if (reason === 'io server disconnect') {
         console.warn('[Socket] Server initiated disconnect, reconnecting in 2s...');
         setTimeout(() => {
@@ -59,6 +102,7 @@ export function getSocket(): Socket {
     });
 
     socket.on('connect_error', (error) => {
+      stopHeartbeat();
       errorCount++;
       if (errorCount === 1) {
         console.warn('Socket connection error:', error.message, '— will retry automatically');

@@ -71,7 +71,10 @@ export async function GET(request: NextRequest) {
 
     case 'status': {
       if (!taskId) {
-        return NextResponse.json({ error: 'Missing taskId' }, { status: 400 });
+        return NextResponse.json(
+          { error: '缺少必要参数：taskId', code: 'SCAN_MISSING_TASK_ID' },
+          { status: 400 },
+        );
       }
       const progress = store.taskProgress.get(taskId);
       const results = store.taskResults.get(taskId) || [];
@@ -86,7 +89,10 @@ export async function GET(request: NextRequest) {
 
     case 'results': {
       if (!taskId) {
-        return NextResponse.json({ error: 'Missing taskId' }, { status: 400 });
+        return NextResponse.json(
+          { error: '缺少必要参数：taskId', code: 'SCAN_MISSING_TASK_ID' },
+          { status: 400 },
+        );
       }
       const results = store.taskResults.get(taskId) || [];
       const progress = store.taskProgress.get(taskId);
@@ -144,7 +150,10 @@ export async function GET(request: NextRequest) {
     }
 
     default:
-      return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
+      return NextResponse.json(
+        { error: '未知的操作类型', code: 'SCAN_UNKNOWN_ACTION' },
+        { status: 400 },
+      );
   }
 }
 
@@ -160,7 +169,7 @@ export async function POST(request: NextRequest) {
       const rateLimit = checkRateLimit(request, { windowMs: 60_000, maxRequests: 10 });
       if (!rateLimit.allowed) {
         return NextResponse.json(
-          { error: 'Too many scan requests. Please try again later.', resetIn: rateLimit.resetIn },
+          { error: '扫描请求过于频繁，请稍后再试', code: 'SCAN_RATE_LIMITED', resetIn: rateLimit.resetIn },
           { status: 429, headers: { 'Retry-After': String(Math.ceil(rateLimit.resetIn / 1000)) } },
         );
       }
@@ -170,14 +179,17 @@ export async function POST(request: NextRequest) {
         const { taskId, request: scanRequest } = body;
 
         if (!taskId || !scanRequest || !scanRequest.urls) {
-          return NextResponse.json({ error: 'Missing taskId or request' }, { status: 400 });
+          return NextResponse.json(
+            { error: '缺少必要参数：taskId 或 request', code: 'SCAN_MISSING_PARAMS' },
+            { status: 400 },
+          );
         }
 
         // SSRF validation: validate all scan URLs before proceeding
         const { valid, invalid } = validateScanUrls(scanRequest.urls);
         if (invalid.length > 0) {
           return NextResponse.json(
-            { error: 'Invalid URLs detected', invalidUrls: invalid },
+            { error: '检测到无效或危险的URL', code: 'SCAN_INVALID_URLS', invalidUrls: invalid },
             { status: 400 },
           );
         }
@@ -188,7 +200,7 @@ export async function POST(request: NextRequest) {
         // Race condition guard: prevent concurrent scan starts
         if (store.activeScanPromises.size > 0) {
           return NextResponse.json(
-            { error: '已有扫描任务正在运行' },
+            { error: '已有扫描任务正在运行', code: 'SCAN_ALREADY_RUNNING' },
             { status: 409 },
           );
         }
@@ -260,7 +272,10 @@ export async function POST(request: NextRequest) {
         if (sessionError) return sessionError;
         const { taskId } = await request.json();
         if (!taskId) {
-          return NextResponse.json({ error: 'Missing taskId' }, { status: 400 });
+          return NextResponse.json(
+            { error: '缺少必要参数：taskId', code: 'SCAN_MISSING_TASK_ID' },
+            { status: 400 },
+          );
         }
         const { stopTask } = await getScanEngine();
         const stopped = stopTask(taskId);
@@ -276,7 +291,10 @@ export async function POST(request: NextRequest) {
         if (sessionError) return sessionError;
         const { taskId } = await request.json();
         if (!taskId) {
-          return NextResponse.json({ error: 'Missing taskId' }, { status: 400 });
+          return NextResponse.json(
+            { error: '缺少必要参数：taskId', code: 'SCAN_MISSING_TASK_ID' },
+            { status: 400 },
+          );
         }
         store.taskResults.delete(taskId);
         store.taskProgress.delete(taskId);
@@ -289,7 +307,10 @@ export async function POST(request: NextRequest) {
     }
 
     default:
-      return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
+      return NextResponse.json(
+        { error: '未知的操作类型', code: 'SCAN_UNKNOWN_ACTION' },
+        { status: 400 },
+      );
   }
 }
 

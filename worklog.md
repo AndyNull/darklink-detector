@@ -2084,3 +2084,104 @@ Fix 6 MEDIUM priority issues identified in the MAGI R5 audit: DNS timeout, socke
 
 ### Verification
 - TypeScript compilation passes (`bunx tsc --noEmit` — no errors)
+
+## Task 15: MAGI R6 — Targeted Improvements
+**Date**: 2025-06-01
+**Agent**: Sub-agent (Task 15)
+
+### Scope
+Six targeted improvements for production reliability and maintainability: startup health recovery, scan rate limiting, improved error messages, WebSocket heartbeat, input sanitization, and version bump.
+
+---
+
+### Fix 1: Startup Health Recovery for Stale Running Tasks ✅
+
+**File**: `src/lib/scan-engine/task-store.ts`
+**Problem**: When the Next.js server restarts, scan tasks in the DB with `status = 'running'` remain in that state forever since the previous process is gone. The UI shows stale "running" scans after a restart.
+**Changes**:
+- Added `recoverStaleRunningTasksFromDB()` function that queries `ScanTask` records with `status = 'running'` and updates them to `status = 'error'` with log entries saying "服务器重启，扫描任务中断"
+- Added `recoverStaleInMemoryTasks()` function that marks in-memory tasks with `status = 'running'` as `status = 'error'`
+- Added exported `startupHealthRecovery()` function that runs both recovery steps (HMR-safe via globalThis guard)
+- Added auto-execution on module load: `startupHealthRecovery().catch(...)` runs when the module is first imported
+
+---
+
+### Fix 2: Scan Rate Limiting per IP ✅
+
+**Files**: `src/app/api/scan/route.ts`, `src/app/api/scan/start/route.ts`
+**Problem**: Scan rate limiting was already implemented in both scan start routes using the existing `checkRateLimit` utility from `src/lib/rate-limit.ts`, but with English error messages.
+**Changes**:
+- Rate limiting was already correctly configured at 10 scan starts per IP per minute in both routes
+- Updated the rate limit error message from English to Chinese: `'扫描请求过于频繁，请稍后再试'` with error code `'SCAN_RATE_LIMITED'`
+- No new rate limiter instance was needed since the existing `checkRateLimit` function already supports custom `windowMs` and `maxRequests` parameters
+
+---
+
+### Fix 3: Improve Error Messages in Scan API ✅
+
+**Files**: `src/app/api/scan/route.ts`, `src/app/api/scan/start/route.ts`
+**Problem**: Scan API error messages were a mix of English and Chinese, inconsistent, and lacked error codes for programmatic handling.
+**Changes** (applied to both files):
+
+All error responses now include:
+- Chinese error messages for user-facing display
+- `code` field for programmatic error handling
+
+Error codes added:
+| Code | Chinese Message | Context |
+|------|----------------|---------|
+| `SCAN_RATE_LIMITED` | 扫描请求过于频繁，请稍后再试 | Rate limit exceeded |
+| `SCAN_MISSING_PARAMS` | 缺少必要参数：taskId 或 request | Missing required parameters |
+| `SCAN_INVALID_URLS` | 检测到无效或危险的URL | Invalid/dangerous URLs |
+| `SCAN_ALREADY_RUNNING` | 已有扫描任务正在运行 | Concurrent scan guard |
+| `SCAN_MISSING_TASK_ID` | 缺少必要参数：taskId | Missing taskId |
+| `SCAN_UNKNOWN_ACTION` | 未知的操作类型 | Unknown action |
+
+---
+
+### Fix 4: WebSocket Heartbeat to Detect Dead Connections ✅
+
+**Files**: `src/lib/socket.ts`, `mini-services/scan-engine/index.ts`
+**Problem**: The client-side Socket.IO connection could become silently dead without detection. While Socket.IO has built-in ping/pong, the client had no custom heartbeat to detect and recover from dead connections.
+**Changes**:
+
+**`src/lib/socket.ts`** (client-side):
+- Added heartbeat mechanism with 25-second ping interval
+- Each ping starts a 10-second timeout; if no `pong` is received, forces a disconnect/reconnect
+- Heartbeat starts on `connect`, stops on `disconnect` and `connect_error`
+- Properly cleans up intervals and timeouts to prevent memory leaks
+
+**`mini-services/scan-engine/index.ts`** (server-side):
+- Added `socket.on('ping', () => { socket.emit('pong'); })` handler to respond to client heartbeat pings
+
+---
+
+### Fix 5: Input Sanitization for URL Scan Targets ✅
+
+**File**: `src/lib/security.ts`
+**Problem**: Scan URLs were not sanitized before validation, leaving them vulnerable to control characters, Unicode homograph attacks, and duplicate scans from tracking parameters.
+**Changes**:
+- Added `sanitizeScanUrl()` function with four sanitization steps:
+  1. **Trim whitespace** — Remove leading/trailing spaces
+  2. **Remove control characters** — Strip C0 and C1 control codes (`\x00-\x1F`, `\x7F-\x9F`)
+  3. **Normalize Unicode** — Apply NFC normalization to reduce homograph attack surface (e.g., visually identical characters with different code points)
+  4. **Strip tracking parameters** — Remove common tracking query params (`utm_*`, `fbclid`, `gclid`, `msclkid`, `_ga`, `ref`, `spm`, `scm`, etc.) that cause duplicate scans
+- Modified `validateScanUrls()` to call `sanitizeScanUrl()` on each URL before validation
+- Sanitized URLs are used in the `valid` array, so downstream code gets clean URLs
+
+---
+
+### Fix 6: Update Version to 1.13.0 ✅
+
+**File**: `package.json`
+**Changes**:
+- Changed `"version": "1.12.0"` to `"version": "1.13.0"`
+- Ran `bun scripts/sync-version.ts` which updated both mini-service package.json files:
+  - `mini-services/scan-engine/package.json`: 1.12.0 → 1.13.0 ✓
+  - `mini-services/data-sync-service/package.json`: 1.12.0 → 1.13.0 ✓
+
+---
+
+### Verification
+- TypeScript compilation passes (`bunx tsc --noEmit` — no errors)
+- Build succeeds (`bun run build` — compiled successfully, 4 pre-existing Turbopack warnings unrelated to changes)

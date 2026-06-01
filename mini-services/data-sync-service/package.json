@@ -1,6 +1,6 @@
 {
   "name": "data-sync-service",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "type": "module",
   "scripts": {
     "dev": "bun --hot index.ts"

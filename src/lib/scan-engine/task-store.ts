@@ -1,5 +1,98 @@
 import type { ScanResultData, ScanProgress, LogEntry } from './types';
 
+// ─── Startup health recovery ───────────────────────────────────────────────────
+// When the server restarts, any scan tasks in the DB with status 'running' are
+// stale (the previous process is gone). Mark them as 'error' so the UI doesn't
+// show zombie "running" scans.
+
+const STARTUP_RECOVERY_KEY = '__darklink_startup_recovery_done__';
+
+async function recoverStaleRunningTasksFromDB(): Promise<number> {
+  try {
+    const { db } = await import('@/lib/db');
+    const staleTasks = await db.scanTask.findMany({
+      where: { status: 'running' },
+      select: { id: true, name: true },
+    });
+
+    if (staleTasks.length === 0) return 0;
+
+    const result = await db.scanTask.updateMany({
+      where: { status: 'running' },
+      data: {
+        status: 'error',
+        updatedAt: new Date(),
+      },
+    });
+
+    // Also add a log entry for each stale task
+    for (const task of staleTasks) {
+      await db.scanLog.create({
+        data: {
+          taskId: task.id,
+          level: 'error',
+          message: '服务器重启，扫描任务中断',
+          detail: 'Server restarted while scan was running; task marked as error',
+        },
+      }).catch(() => {}); // Don't fail if log creation fails
+    }
+
+    console.log(`[TaskStore] Startup recovery: marked ${result.count} stale running task(s) as error`);
+    return result.count;
+  } catch (err) {
+    console.warn('[TaskStore] Startup recovery: failed to query DB (may not be initialized yet):', err);
+    return 0;
+  }
+}
+
+/** Recover in-memory tasks that are still marked as running (stale from HMR or restart) */
+function recoverStaleInMemoryTasks(): number {
+  const store = getStore();
+  let recovered = 0;
+
+  for (const [taskId, progress] of store.taskProgress) {
+    if (progress.status === 'running') {
+      store.taskProgress.set(taskId, {
+        ...progress,
+        status: 'error',
+        completedAt: Date.now(),
+      });
+      // Add a log entry
+      const existing = store.taskLogs.get(taskId) || [];
+      existing.push({
+        level: 'error',
+        message: '服务器重启，扫描任务中断',
+        timestamp: new Date(),
+      });
+      store.taskLogs.set(taskId, existing);
+      // Remove from active promises
+      store.activeScanPromises.delete(taskId);
+      recovered++;
+    }
+  }
+
+  return recovered;
+}
+
+/**
+ * Run startup health recovery. Safe to call multiple times — only runs once.
+ * Recovers both DB-level and in-memory stale running tasks.
+ */
+export async function startupHealthRecovery(): Promise<void> {
+  const globalScope = globalThis as any;
+  if (globalScope[STARTUP_RECOVERY_KEY]) return;
+  globalScope[STARTUP_RECOVERY_KEY] = true;
+
+  // Recover in-memory stale tasks first
+  const memRecovered = recoverStaleInMemoryTasks();
+  if (memRecovered > 0) {
+    console.log(`[TaskStore] Startup recovery: recovered ${memRecovered} stale in-memory task(s)`);
+  }
+
+  // Then recover DB-level stale tasks
+  await recoverStaleRunningTasksFromDB();
+}
+
 // ─── In-memory task store using globalThis ─────────────────────────────────────
 // CRITICAL: Next.js Turbopack may create separate module instances for different
 // API routes. Using globalThis ensures all routes share the same state.
@@ -159,3 +252,9 @@ if (!globalScope.__SCAN_TASK_CLEANUP_TIMER__) {
     if (removed > 0) console.log(`[TaskStore] Periodic cleanup: removed ${removed} old task(s)`);
   }, 15 * 60 * 1000); // Every 15 minutes
 }
+
+// ─── Startup recovery (auto-run on module load) ─────────────────────────────────
+// Run on module load to recover stale running tasks from previous process
+startupHealthRecovery().catch((err) => {
+  console.warn('[TaskStore] Startup recovery failed:', err);
+});

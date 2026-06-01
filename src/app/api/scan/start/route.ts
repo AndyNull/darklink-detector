@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   const rateLimit = checkRateLimit(request, { windowMs: 60_000, maxRequests: 10 });
   if (!rateLimit.allowed) {
     return NextResponse.json(
-      { error: 'Too many scan requests. Please try again later.', resetIn: rateLimit.resetIn },
+      { error: '扫描请求过于频繁，请稍后再试', code: 'SCAN_RATE_LIMITED', resetIn: rateLimit.resetIn },
       { status: 429, headers: { 'Retry-After': String(Math.ceil(rateLimit.resetIn / 1000)) } },
     );
   }
@@ -26,14 +26,17 @@ export async function POST(request: NextRequest) {
     const { taskId, request: scanRequest } = body;
 
     if (!taskId || !scanRequest || !scanRequest.urls) {
-      return NextResponse.json({ error: 'Missing taskId or request' }, { status: 400 });
+      return NextResponse.json(
+        { error: '缺少必要参数：taskId 或 request', code: 'SCAN_MISSING_PARAMS' },
+        { status: 400 },
+      );
     }
 
     // SSRF validation: validate all scan URLs before proceeding
     const { valid, invalid } = validateScanUrls(scanRequest.urls);
     if (invalid.length > 0) {
       return NextResponse.json(
-        { error: 'Invalid URLs detected', invalidUrls: invalid },
+        { error: '检测到无效或危险的URL', code: 'SCAN_INVALID_URLS', invalidUrls: invalid },
         { status: 400 },
       );
     }
@@ -44,7 +47,7 @@ export async function POST(request: NextRequest) {
     // Race condition guard: prevent concurrent scan starts
     if (isAnyTaskRunning()) {
       return NextResponse.json(
-        { error: '已有扫描任务正在运行' },
+        { error: '已有扫描任务正在运行', code: 'SCAN_ALREADY_RUNNING' },
         { status: 409 },
       );
     }

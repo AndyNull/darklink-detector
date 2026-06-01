@@ -476,6 +476,11 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Handle custom heartbeat ping from client
+  socket.on('ping', () => {
+    socket.emit('pong');
+  });
+
   socket.on('disconnect', (reason) => {
     console.log(`[WS] Client disconnected: ${socket.id} (${reason})`);
   });

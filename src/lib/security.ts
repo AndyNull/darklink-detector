@@ -4,6 +4,7 @@
  * - DNS rebinding protection: validate resolved IPs post-DNS-lookup (validateResolvedIP)
  * - IP validation: strict octet checking (0-255, no leading zeros)
  * - Header sanitization: prevent CRLF injection
+ * - Input sanitization: URL sanitization to prevent homograph attacks and duplicate scans
  */
 
 // Private IP ranges to block for SSRF protection
@@ -228,13 +229,70 @@ export function sanitizeHeaders(headers: Record<string, string>): Record<string,
 }
 
 /**
+ * Sanitize a URL before validation.
+ * - Trim whitespace
+ * - Remove control characters
+ * - Normalize Unicode for homograph attack prevention
+ * - Strip common tracking parameters that cause duplicate scans
+ */
+export function sanitizeScanUrl(url: string): string {
+  let sanitized = url;
+
+  // 1. Trim whitespace
+  sanitized = sanitized.trim();
+
+  // 2. Remove control characters (C0 and C1 control codes: \x00-\x1F, \x7F-\x9F)
+  sanitized = sanitized.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+
+  // 3. Normalize Unicode to NFC form to prevent homograph attacks
+  //    NFC normalization composes characters where possible,
+  //    reducing the attack surface for visually similar but
+  //    differently encoded characters
+  sanitized = sanitized.normalize('NFC');
+
+  // 4. Strip common tracking parameters that cause duplicate scans
+  try {
+    const parsed = new URL(sanitized);
+    let modified = false;
+
+    const TRACKING_PARAMS = [
+      'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+      'fbclid', 'gclid', 'gclsrc', 'dclid',
+      'msclkid', 'mc_eid',
+      '_ga', '_gl', '_gid',
+      'hsa_cam', 'hsa_grp', 'hsa_mt', 'hsa_src', 'hsa_ad', 'hsa_acc',
+      'ref', 'referrer',
+      'spm', 'scm', // Common in Chinese e-commerce (Alibaba, Taobao)
+    ];
+
+    for (const param of TRACKING_PARAMS) {
+      if (parsed.searchParams.has(param)) {
+        parsed.searchParams.delete(param);
+        modified = true;
+      }
+    }
+
+    if (modified) {
+      sanitized = parsed.toString();
+    }
+  } catch {
+    // If URL parsing fails, just return the trimmed/cleaned version
+    // Validation will catch the invalid URL
+  }
+
+  return sanitized;
+}
+
+/**
  * Batch validate scan URLs
  */
 export function validateScanUrls(urls: string[]): { valid: string[]; invalid: { url: string; reason: string }[] } {
   const valid: string[] = [];
   const invalid: { url: string; reason: string }[] = [];
 
-  for (const url of urls) {
+  for (const rawUrl of urls) {
+    // Sanitize before validation
+    const url = sanitizeScanUrl(rawUrl);
     const result = validateScanUrl(url);
     if (result.valid) {
       valid.push(url);
