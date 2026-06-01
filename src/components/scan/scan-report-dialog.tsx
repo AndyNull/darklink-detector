@@ -65,6 +65,11 @@ const typeLabels: Record<string, string> = {
   js_obfuscated: 'JS混淆',
   data_uri: 'Data URI',
   svg_hidden: 'SVG隐藏',
+  nofollow_suspicious: 'Nofollow外链',
+  link_farm: '链接农场',
+  mixed_content: '混合内容',
+  data_uri_link: 'Data URI链接',
+  noscript_hidden: 'Noscript隐藏',
 };
 
 function formatDuration(ms: number | null): string {

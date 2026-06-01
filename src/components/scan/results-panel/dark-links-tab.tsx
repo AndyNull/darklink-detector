@@ -44,6 +44,21 @@ export function DarkLinksTab({
   copiedUrl,
   onCopy,
 }: DarkLinksTabProps) {
+  // Pre-compute hostname → DB match flags once, avoiding new URL() in JSX per render
+  const linkMatchFlags = React.useMemo(() => {
+    const flags = new Map<string, { inMaliciousDB: boolean; inSuspiciousDB: boolean; threatIntelConfirmed: boolean }>();
+    for (const link of sortedDarkLinks) {
+      let hostname: string;
+      try { hostname = new URL(link.url).hostname; } catch { hostname = ''; }
+      flags.set(link.url, {
+        inMaliciousDB: hostname ? maliciousMatches.has(hostname) : false,
+        inSuspiciousDB: hostname ? suspiciousMatches.has(hostname) : false,
+        threatIntelConfirmed: hostname ? threatIntelConfirmed.has(hostname) : false,
+      });
+    }
+    return flags;
+  }, [sortedDarkLinks, maliciousMatches, suspiciousMatches, threatIntelConfirmed]);
+
   return (
     <>
       {/* Toolbar: severity filter + sorting + severity summary */}
@@ -95,9 +110,20 @@ export function DarkLinksTab({
         </div>
       ) : (
         <div className="space-y-1">
-          {sortedDarkLinks.map((link, i) => (
-            <DarkLinkCard key={`${link.url}-${link.type}-${i}`} link={link} onCopy={onCopy} copiedUrl={copiedUrl} inMaliciousDB={(() => { try { return maliciousMatches.has(new URL(link.url).hostname); } catch { return false; } })()} inSuspiciousDB={(() => { try { return suspiciousMatches.has(new URL(link.url).hostname); } catch { return false; } })()} threatIntelConfirmed={(() => { try { return threatIntelConfirmed.has(new URL(link.url).hostname); } catch { return false; } })()} />
-          ))}
+          {sortedDarkLinks.map((link, i) => {
+            const flags = linkMatchFlags.get(link.url);
+            return (
+              <DarkLinkCard
+                key={`${link.url}-${link.type}-${i}`}
+                link={link}
+                onCopy={onCopy}
+                copiedUrl={copiedUrl}
+                inMaliciousDB={flags?.inMaliciousDB ?? false}
+                inSuspiciousDB={flags?.inSuspiciousDB ?? false}
+                threatIntelConfirmed={flags?.threatIntelConfirmed ?? false}
+              />
+            );
+          })}
         </div>
       )}
     </>

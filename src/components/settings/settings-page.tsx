@@ -64,7 +64,7 @@ function getRuleStates(): Record<string, boolean> {
   try {
     const stored = localStorage.getItem('detection-rules-states');
     if (stored) return JSON.parse(stored);
-  } catch {}
+  } catch (err) { console.warn('Settings error:', err); }
   const defaults: Record<string, boolean> = {};
   detectionRules.forEach(r => { defaults[r.id] = true; });
   return defaults;
@@ -73,7 +73,7 @@ function getRuleStates(): Record<string, boolean> {
 function saveRuleStates(states: Record<string, boolean>) {
   try {
     localStorage.setItem('detection-rules-states', JSON.stringify(states));
-  } catch {}
+  } catch (err) { console.warn('Settings error:', err); }
 }
 
 // System settings helpers
@@ -82,14 +82,14 @@ function getSystemSettings() {
   try {
     const stored = localStorage.getItem('system-settings');
     if (stored) return JSON.parse(stored);
-  } catch {}
+  } catch (err) { console.warn('Settings error:', err); }
   return { systemName: '暗链检测系统', scanTimeout: '30', maxConcurrency: '10', autoUpdateHours: '24' };
 }
 
 function saveSystemSettings(settings: Record<string, string>) {
   try {
     localStorage.setItem('system-settings', JSON.stringify(settings));
-  } catch {}
+  } catch (err) { console.warn('Settings error:', err); }
 }
 
 // Notification settings helpers
@@ -98,14 +98,14 @@ function getNotificationSettings(): Record<string, boolean> {
   try {
     const stored = localStorage.getItem('notification-settings');
     if (stored) return JSON.parse(stored);
-  } catch {}
+  } catch (err) { console.warn('Settings error:', err); }
   return { scanComplete: true, scanError: true, intelUpdate: false };
 }
 
 function saveNotificationSettings(settings: Record<string, boolean>) {
   try {
     localStorage.setItem('notification-settings', JSON.stringify(settings));
-  } catch {}
+  } catch (err) { console.warn('Settings error:', err); }
 }
 
 type SettingsTab = 'general' | 'rules' | 'intel' | 'apikeys' | 'notifications';

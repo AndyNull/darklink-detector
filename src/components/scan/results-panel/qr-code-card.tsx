@@ -49,6 +49,7 @@ export const QrCodeCard = React.memo(function QrCodeCard({ qr, onCopy, copiedUrl
             size="sm"
             className="h-3.5 w-3.5 p-0 ml-auto shrink-0"
             onClick={(e) => { e.stopPropagation(); onCopy(qr.decodedText, e); }}
+            aria-label="复制"
           >
             {copiedUrl === qr.decodedText ? (
               <Check className="h-2 w-2 text-green-600" />

@@ -103,11 +103,14 @@ async function fetchWithCurl(
     '-H', `User-Agent: ${ua}`,
   ];
 
-  // Add extra headers
+  // Add extra headers with sanitization to prevent header injection (CR/LF)
   if (extraHeaders) {
     for (const [key, value] of Object.entries(extraHeaders)) {
-      if (key.toLowerCase() !== 'user-agent' && key.toLowerCase() !== 'accept' && key.toLowerCase() !== 'accept-language') {
-        args.push('-H', `${key}: ${value}`);
+      // Prevent header injection: strip CR/LF characters
+      const sanitizedValue = String(value).replace(/[\r\n]/g, '');
+      const sanitizedKey = String(key).replace(/[\r\n]/g, '');
+      if (sanitizedKey && sanitizedValue && sanitizedKey.toLowerCase() !== 'user-agent' && sanitizedKey.toLowerCase() !== 'accept' && sanitizedKey.toLowerCase() !== 'accept-language') {
+        args.push('-H', `${sanitizedKey}: ${sanitizedValue}`);
       }
     }
   }
@@ -330,8 +333,9 @@ async function detectQrFromDataUris(dataUris: string[]): Promise<QrCodeData[]> {
       // Use the proper data URI detector which handles base64 fallback for qrImageBase64
       const res = await detectQrCodesFromDataUri(uri, uri.slice(0, 80) + '...');
       results.push(...res);
-    } catch {
+    } catch (e) {
       // Silently skip failed data URI decodes
+      console.debug('Data URI QR decode failed:', e);
     }
   }
 
@@ -413,7 +417,7 @@ function extractDedupKey(url: string, domain?: string): string {
   if (domain && !IP_REGEX.test(domain)) return domain;
   try {
     return new URL(url).hostname;
-  } catch {
+  } catch (e) {
     return domain || url;
   }
 }
@@ -444,8 +448,9 @@ async function fetchExternalResource(
         return null; // Silently block — don't fetch private IPs
       }
     }
-  } catch {
+  } catch (e) {
     // DNS lookup failed or invalid URL — skip and let fetch handle it
+    console.debug('DNS rebinding check failed for external resource:', e);
   }
 
   try {
@@ -485,7 +490,8 @@ async function fetchExternalResource(
 
     const text = await response.text();
     return { text, ok: true, status: response.status };
-  } catch {
+  } catch (e) {
+    console.debug('External resource fetch failed:', e);
     return null;
   }
 }
@@ -603,6 +609,11 @@ function trimResultArrays(result: ScanResultData): void {
     });
   }
 }
+
+// ─── Image URL detection regex constants (module-level for reuse) ───────────
+const IMAGE_EXTENSIONS = /\.(jpg|jpeg|png|gif|webp|bmp|svg|ico|avif)(\?|$)/i;
+const QR_IMAGE_PATTERNS = /\/(qr|qrcode|weixin|weibo|wechat|code|ewm|barcode|scan)/i;
+const IMAGE_DIR_PATTERNS = /\/(image|img|photo|picture|pic|upload|static|assets|resource|media|content|data|files|cdn|qrcode|qr-code)/i;
 
 // ─── Shared post-fetch HTML analysis ────────────────────────────────────────
 // Extracted from the duplicated code in the normal path and curl fallback path.
@@ -726,19 +737,18 @@ async function analyzeHtmlResult(params: {
   // =====================================================
 
   // Collect image URLs from HTML AND external JS/CSS files
-  const htmlImageUrls = imageExtractionResult;
-  const IMAGE_EXTENSIONS = /\.(jpg|jpeg|png|gif|webp|bmp|svg|ico|avif)(\?|$)/i;
-  const QR_IMAGE_PATTERNS = /\/(qr|qrcode|weixin|weibo|wechat|code|ewm|barcode|scan)/i;
-  const IMAGE_DIR_PATTERNS = /\/(image|img|photo|picture|pic|upload|static|assets|resource|media|content|data|files|cdn|qrcode|qr-code)/i;
+  // Use Sets for O(1) dedup lookups instead of Array.includes() O(n)
+  const htmlImageUrlsSet = new Set<string>(imageExtractionResult);
+  const externalImageUrlsSet = new Set<string>();
+  const inlineScriptImagesSet = new Set<string>();
 
   // Extract image-like URLs from external JS/CSS resources
-  const externalImageUrls: string[] = [];
   for (const { url: resUrl, text: resourceText } of resourceResults) {
     const urls = extractUrlsFromJs(resourceText, baseUrl);
     for (const u of urls) {
       if (IMAGE_EXTENSIONS.test(u) || QR_IMAGE_PATTERNS.test(u) || IMAGE_DIR_PATTERNS.test(u)) {
-        if (!htmlImageUrls.includes(u) && !externalImageUrls.includes(u)) {
-          externalImageUrls.push(u);
+        if (!htmlImageUrlsSet.has(u) && !externalImageUrlsSet.has(u)) {
+          externalImageUrlsSet.add(u);
         }
       }
     }
@@ -753,10 +763,10 @@ async function analyzeHtmlResult(params: {
       let m: RegExpExecArray | null;
       while ((m = pattern.exec(resourceText)) !== null) {
         const imgUrl = m[1];
-        if (imgUrl && !htmlImageUrls.includes(imgUrl) && !externalImageUrls.includes(imgUrl)) {
+        if (imgUrl && !htmlImageUrlsSet.has(imgUrl) && !externalImageUrlsSet.has(imgUrl)) {
           const resolved = imgUrl.startsWith('data:') ? imgUrl : (resolveUrl(imgUrl, baseUrl) || imgUrl);
-          if (!htmlImageUrls.includes(resolved) && !externalImageUrls.includes(resolved)) {
-            externalImageUrls.push(resolved);
+          if (!htmlImageUrlsSet.has(resolved) && !externalImageUrlsSet.has(resolved)) {
+            externalImageUrlsSet.add(resolved);
           }
         }
       }
@@ -764,7 +774,6 @@ async function analyzeHtmlResult(params: {
   }
 
   // Scan inline scripts for dynamically loaded image patterns
-  const inlineScriptImages: string[] = [];
   const inlineScriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
   let scriptMatch: RegExpExecArray | null;
   while ((scriptMatch = inlineScriptRegex.exec(html)) !== null) {
@@ -772,11 +781,16 @@ async function analyzeHtmlResult(params: {
     if (!scriptContent || scriptContent.length < 10) continue;
     const scriptUrls = extractUrlsFromJs(scriptContent, baseUrl);
     for (const u of scriptUrls) {
-      if ((IMAGE_EXTENSIONS.test(u) || QR_IMAGE_PATTERNS.test(u) || IMAGE_DIR_PATTERNS.test(u)) && !htmlImageUrls.includes(u) && !externalImageUrls.includes(u) && !inlineScriptImages.includes(u)) {
-        inlineScriptImages.push(u);
+      if ((IMAGE_EXTENSIONS.test(u) || QR_IMAGE_PATTERNS.test(u) || IMAGE_DIR_PATTERNS.test(u)) && !htmlImageUrlsSet.has(u) && !externalImageUrlsSet.has(u) && !inlineScriptImagesSet.has(u)) {
+        inlineScriptImagesSet.add(u);
       }
     }
   }
+
+  // Convert Sets back to arrays for downstream consumption
+  const htmlImageUrls = Array.from(htmlImageUrlsSet);
+  const externalImageUrls = Array.from(externalImageUrlsSet);
+  const inlineScriptImages = Array.from(inlineScriptImagesSet);
 
   // Browser rendering for dynamic image detection
   let browserImageUrls: string[] = [];
@@ -1615,8 +1629,8 @@ export async function executeScan(
         undefined,
         'scan_task',
         taskId
-      ).catch(() => {});
-    } catch {}
+      ).catch((e) => { console.warn('Audit log failed:', e); });
+    } catch (e) { console.warn('Audit log failed:', e); }
   } finally {
     htmlCache.clear();
     activeTasks.delete(taskId);

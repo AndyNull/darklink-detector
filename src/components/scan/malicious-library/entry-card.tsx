@@ -89,6 +89,7 @@ export const EntryCard = React.memo(function EntryCard({
             className="h-4 w-4 p-0 ml-auto shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
             onClick={() => onDelete(entry.id)}
             disabled={deleting}
+            aria-label="删除"
           >
             {deleting ? (
               <Loader2 className="h-2.5 w-2.5 animate-spin" />

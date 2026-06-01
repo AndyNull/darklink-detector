@@ -142,6 +142,7 @@ export function ApiKeyField({
             size="sm"
             className="absolute right-0 top-0 h-8 w-8 p-0 cursor-pointer transition-colors hover:bg-accent hover:text-accent-foreground"
             onClick={() => setShowKey(!showKey)}
+            aria-label={showKey ? '隐藏密钥' : '显示密钥'}
           >
             {showKey ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
           </Button>

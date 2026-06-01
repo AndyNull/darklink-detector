@@ -174,6 +174,7 @@ export function AllResultsTab({ filteredResults, copiedUrl, onCopy, onPreview }:
                 className="h-4 w-4 p-0 shrink-0"
                 onClick={(e) => { e.stopPropagation(); onPreview(result); }}
                 title="查看源码"
+                aria-label="查看源码"
               >
                 <Code2 className="h-2 w-2" />
               </Button>
@@ -182,6 +183,7 @@ export function AllResultsTab({ filteredResults, copiedUrl, onCopy, onPreview }:
                 size="sm"
                 className="h-4 w-4 p-0 shrink-0"
                 onClick={(e) => onCopy(result.url, e)}
+                aria-label="复制"
               >
                 {copiedUrl === result.url ? (
                   <Check className="h-2 w-2 text-green-600" />

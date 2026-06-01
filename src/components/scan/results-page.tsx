@@ -218,7 +218,7 @@ export function ResultsPage({ onNavigateToScan, isMobile: isMobileProp }: { onNa
             <BarChart3 className="h-2.5 w-2.5" />
           </Button>
           {isAuthenticated && (
-            <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive shrink-0" onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(task.taskId); }} disabled={deletingTaskId === task.taskId} title="删除">
+            <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive shrink-0" onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(task.taskId); }} disabled={deletingTaskId === task.taskId} title="删除" aria-label="删除">
               {deletingTaskId === task.taskId ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Trash2 className="h-2.5 w-2.5" />}
             </Button>
           )}
@@ -398,6 +398,7 @@ export function ResultsPage({ onNavigateToScan, isMobile: isMobileProp }: { onNa
                   onClick={fetchTasks}
                   disabled={loading}
                   title="刷新"
+                  aria-label="刷新"
                 >
                   <RefreshCw className={`h-2.5 w-2.5 ${loading ? 'animate-spin' : ''}`} />
                 </Button>
@@ -454,6 +455,7 @@ export function ResultsPage({ onNavigateToScan, isMobile: isMobileProp }: { onNa
               onClick={fetchTasks}
               disabled={loading}
               title="刷新"
+              aria-label="刷新"
             >
               <RefreshCw className={`h-2.5 w-2.5 ${loading ? 'animate-spin' : ''}`} />
             </Button>

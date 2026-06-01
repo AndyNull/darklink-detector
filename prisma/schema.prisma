@@ -51,6 +51,8 @@ model ScanResult {
 
   @@index([taskId])
   @@index([status])
+  @@index([url])
+  @@index([createdAt])
 }
 
 model UrlDetail {
@@ -85,6 +87,7 @@ model DarkLink {
   result      ScanResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
 
   @@index([resultId])
+  @@index([type])
   @@index([severity])
 }
 
@@ -124,6 +127,9 @@ model MaliciousDomain {
   category    String?  // phishing, malware, c2, spam, etc.
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@index([source])
+  @@index([severity])
 }
 
 model MaliciousIP {
@@ -136,6 +142,9 @@ model MaliciousIP {
   country     String?  // geo location
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@index([source])
+  @@index([severity])
 }
 
 model UpdateSchedule {
@@ -220,4 +229,7 @@ model SyncTask {
   startedAt        DateTime?
   completedAt      DateTime?
   createdBy        String?
+
+  @@index([status])
+  @@index([createdAt])
 }

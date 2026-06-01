@@ -81,6 +81,8 @@ export type DarkLinkType =
   | 'form_hijack'
   | 'svg_hidden'
   | 'nofollow_suspicious'
+  | 'link_farm'
+  | 'mixed_content'
   | 'data_uri_link'
   | 'noscript_hidden';
 

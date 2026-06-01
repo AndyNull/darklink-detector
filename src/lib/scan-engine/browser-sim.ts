@@ -2,6 +2,9 @@
 // Each fingerprint includes UA, Accept-Language, viewport, and platform info
 // to make concurrent scan threads look like different real browsers.
 
+import { validateResolvedIP } from '../security';
+import { lookup } from 'dns/promises';
+
 // ─── Fingerprint Types ─────────────────────────────────────────────────────
 
 export interface BrowserFingerprint {
@@ -266,6 +269,21 @@ export async function fetchWithRedirectControl(
       if (redirectUrl === currentUrl) {
         console.warn(`Redirect loop detected: ${currentUrl}`);
         return { response, finalUrl: currentUrl, redirectCount };
+      }
+
+      // SSRF protection: validate redirect target's DNS resolution
+      // Prevent redirects to private/reserved IPs (DNS rebinding via redirect)
+      try {
+        const redirectHost = new URL(redirectUrl).hostname;
+        if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(redirectHost)) {
+          const { address } = await lookup(redirectHost);
+          if (!validateResolvedIP(address)) {
+            console.warn(`Redirect to private IP blocked: ${redirectHost} -> ${address}`);
+            return { response, finalUrl: currentUrl, redirectCount };
+          }
+        }
+      } catch {
+        // DNS lookup failed — let it proceed, the fetch will fail on its own
       }
 
       // For 301/302/303, change method to GET (browser behavior)

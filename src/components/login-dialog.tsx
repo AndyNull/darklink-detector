@@ -142,6 +142,7 @@ export function LoginDialog({ open, onOpenChange }: LoginDialogProps) {
                 type="button"
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground active:text-foreground/80 transition-colors cursor-pointer"
                 onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? '隐藏密码' : '显示密码'}
               >
                 {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
               </button>

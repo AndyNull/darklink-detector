@@ -175,6 +175,7 @@ export function EntryList({
                       className="h-5 w-5 p-0 text-muted-foreground"
                       onClick={() => onToggleActive(entry)}
                       title={entry.isActive ? '禁用' : '启用'}
+                      aria-label={entry.isActive ? '禁用' : '启用'}
                     >
                       {entry.isActive ? (
                         <ToggleRight className="h-3 w-3 text-green-600" />
@@ -189,6 +190,7 @@ export function EntryList({
                       onClick={() => onDelete(entry.id)}
                       disabled={deletingId === entry.id}
                       title="删除"
+                      aria-label="删除"
                     >
                       {deletingId === entry.id ? (
                         <Loader2 className="h-2.5 w-2.5 animate-spin" />

@@ -52,7 +52,7 @@ function ThreatIntelResult({ type, value }: { type: 'domain' | 'ip'; value: stri
       if (res.ok) {
         setAdded(true);
       }
-    } catch {}
+    } catch(e) { console.warn('Error:', e); }
     setAdding(false);
   };
 
@@ -250,7 +250,7 @@ export function UrlDetailsPanel() {
       await navigator.clipboard.writeText(url);
       setCopiedUrl(url);
       setTimeout(() => setCopiedUrl(null), 2000);
-    } catch {}
+    } catch(e) { console.warn('Error:', e); }
   };
 
   return (
@@ -351,7 +351,7 @@ export function UrlDetailsPanel() {
                 {/* Threat intel query */}
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="ghost" size="sm" className="h-5 w-5 p-0 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <Button variant="ghost" size="sm" className="h-5 w-5 p-0 shrink-0" onClick={(e) => e.stopPropagation()} aria-label="威胁情报">
                       <ShieldAlert className="h-2.5 w-2.5 text-muted-foreground" />
                     </Button>
                   </PopoverTrigger>
@@ -366,6 +366,7 @@ export function UrlDetailsPanel() {
                   size="sm"
                   className="h-5 w-5 p-0 shrink-0"
                   onClick={() => handleCopyUrl(detail.url)}
+                  aria-label="复制"
                 >
                   {copiedUrl === detail.url ? (
                     <Check className="h-2.5 w-2.5 text-green-600" />

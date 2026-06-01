@@ -120,11 +120,14 @@ async function fetchWithCurl(
     '-H', `User-Agent: ${ua}`,
   ];
 
-  // Add extra headers
+  // Add extra headers with sanitization to prevent header injection (CR/LF)
   if (extraHeaders) {
     for (const [key, value] of Object.entries(extraHeaders)) {
-      if (key.toLowerCase() !== 'user-agent' && key.toLowerCase() !== 'accept' && key.toLowerCase() !== 'accept-language') {
-        args.push('-H', `${key}: ${value}`);
+      // Prevent header injection: strip CR/LF characters
+      const sanitizedValue = String(value).replace(/[\r\n]/g, '');
+      const sanitizedKey = String(key).replace(/[\r\n]/g, '');
+      if (sanitizedKey && sanitizedValue && sanitizedKey.toLowerCase() !== 'user-agent' && sanitizedKey.toLowerCase() !== 'accept' && sanitizedKey.toLowerCase() !== 'accept-language') {
+        args.push('-H', `${sanitizedKey}: ${sanitizedValue}`);
       }
     }
   }
@@ -937,6 +940,11 @@ function trimResultArrays(result: ScanResultData): void {
   }
 }
 
+// ─── Image URL detection regex constants (module-level for reuse) ───────────
+const IMAGE_EXTENSIONS = /\.(jpg|jpeg|png|gif|webp|bmp|svg|ico|avif)(\?|$)/i;
+const QR_IMAGE_PATTERNS = /\/(qr|qrcode|weixin|weibo|wechat|code|ewm|barcode|scan)/i;
+const IMAGE_DIR_PATTERNS = /\/(image|img|photo|picture|pic|upload|static|assets|resource|media|content|data|files|cdn|qrcode|qr-code)/i;
+
 // ─── Shared post-fetch HTML analysis ────────────────────────────────────────
 // Extracted from the duplicated code in the normal path and curl fallback path.
 // Handles: HTML parsing, external resource fetching, domain dedup, image URL
@@ -1050,17 +1058,16 @@ async function analyzeHtmlResult(params: {
   emitLog('info', `深度扫描完成: ${sourceUrl}`, `总计 ${result.extractedUrls} 个URL, ${result.darkLinks} 个疑似暗链`);
 
   // Image URL Collection & QR Code Detection
-  const htmlImageUrls = imageExtractionResult;
-  const IMAGE_EXTENSIONS = /\.(jpg|jpeg|png|gif|webp|bmp|svg|ico|avif)(\?|$)/i;
-  const QR_IMAGE_PATTERNS = /\/(qr|qrcode|weixin|weibo|wechat|code|ewm|barcode|scan)/i;
-  const IMAGE_DIR_PATTERNS = /\/(image|img|photo|picture|pic|upload|static|assets|resource|media|content|data|files|cdn|qrcode|qr-code)/i;
-  const externalImageUrls: string[] = [];
+  // Use Sets for O(1) dedup lookups instead of Array.includes() O(n)
+  const htmlImageUrlsSet = new Set<string>(imageExtractionResult);
+  const externalImageUrlsSet = new Set<string>();
+  const inlineScriptImagesSet = new Set<string>();
   for (const { url: resUrl, text: resourceText } of resourceResults) {
     const urls = extractUrlsFromJs(resourceText, baseUrl);
     for (const u of urls) {
       if (IMAGE_EXTENSIONS.test(u) || QR_IMAGE_PATTERNS.test(u) || IMAGE_DIR_PATTERNS.test(u)) {
-        if (!htmlImageUrls.includes(u) && !externalImageUrls.includes(u)) {
-          externalImageUrls.push(u);
+        if (!htmlImageUrlsSet.has(u) && !externalImageUrlsSet.has(u)) {
+          externalImageUrlsSet.add(u);
         }
       }
     }
@@ -1074,17 +1081,16 @@ async function analyzeHtmlResult(params: {
       let m: RegExpExecArray | null;
       while ((m = pattern.exec(resourceText)) !== null) {
         const imgUrl = m[1];
-        if (imgUrl && !htmlImageUrls.includes(imgUrl) && !externalImageUrls.includes(imgUrl)) {
+        if (imgUrl && !htmlImageUrlsSet.has(imgUrl) && !externalImageUrlsSet.has(imgUrl)) {
           const resolved = imgUrl.startsWith('data:') ? imgUrl : (resolveUrl(imgUrl, baseUrl) || imgUrl);
-          if (!htmlImageUrls.includes(resolved) && !externalImageUrls.includes(resolved)) {
-            externalImageUrls.push(resolved);
+          if (!htmlImageUrlsSet.has(resolved) && !externalImageUrlsSet.has(resolved)) {
+            externalImageUrlsSet.add(resolved);
           }
         }
       }
     }
   }
 
-  const inlineScriptImages: string[] = [];
   const inlineScriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
   let scriptMatch: RegExpExecArray | null;
   while ((scriptMatch = inlineScriptRegex.exec(html)) !== null) {
@@ -1092,11 +1098,16 @@ async function analyzeHtmlResult(params: {
     if (!scriptContent || scriptContent.length < 10) continue;
     const scriptUrls = extractUrlsFromJs(scriptContent, baseUrl);
     for (const u of scriptUrls) {
-      if ((IMAGE_EXTENSIONS.test(u) || QR_IMAGE_PATTERNS.test(u) || IMAGE_DIR_PATTERNS.test(u)) && !htmlImageUrls.includes(u) && !externalImageUrls.includes(u) && !inlineScriptImages.includes(u)) {
-        inlineScriptImages.push(u);
+      if ((IMAGE_EXTENSIONS.test(u) || QR_IMAGE_PATTERNS.test(u) || IMAGE_DIR_PATTERNS.test(u)) && !htmlImageUrlsSet.has(u) && !externalImageUrlsSet.has(u) && !inlineScriptImagesSet.has(u)) {
+        inlineScriptImagesSet.add(u);
       }
     }
   }
+
+  // Convert Sets back to arrays for downstream consumption
+  const htmlImageUrls = Array.from(htmlImageUrlsSet);
+  const externalImageUrls = Array.from(externalImageUrlsSet);
+  const inlineScriptImages = Array.from(inlineScriptImagesSet);
 
   const allImageUrls = [...htmlImageUrls, ...externalImageUrls, ...inlineScriptImages];
   emitLog('info', `发现 ${allImageUrls.length} 个图片URL (HTML: ${htmlImageUrls.length}, 外部资源: ${externalImageUrls.length}, 内联脚本: ${inlineScriptImages.length}): ${sourceUrl}`);

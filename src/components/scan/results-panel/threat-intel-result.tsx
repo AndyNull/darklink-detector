@@ -38,7 +38,7 @@ export const ThreatIntelResult = React.memo(function ThreatIntelResult({ type, v
       if (res.ok) {
         setAdded(true);
       }
-    } catch {}
+    } catch(e) { console.warn('Error:', e); }
     setAdding(false);
   };
 

@@ -76,6 +76,7 @@ const UrlEntryItem = memo(function UrlEntryItem({
           size="sm"
           className={`h-5 w-5 p-0 shrink-0 ${isMobile ? 'opacity-70' : 'opacity-0 group-hover:opacity-100'}`}
           onClick={onToggleExpand}
+          aria-label="配置"
         >
           <Settings2 className="h-3 w-3" />
         </Button>
@@ -84,6 +85,7 @@ const UrlEntryItem = memo(function UrlEntryItem({
           size="sm"
           className={`h-5 w-5 p-0 text-destructive shrink-0 ${isMobile ? 'opacity-70' : 'opacity-0 group-hover:opacity-100'}`}
           onClick={onRemove}
+          aria-label="删除"
         >
           <X className="h-3 w-3" />
         </Button>
@@ -133,6 +135,7 @@ const UrlEntryItem = memo(function UrlEntryItem({
                   size="sm"
                   className="h-7 w-7 p-0 shrink-0 text-muted-foreground hover:text-destructive"
                   onClick={() => removeHeader(urlConfig.id, key)}
+                  aria-label="删除请求头"
                 >
                   <X className="h-3 w-3" />
                 </Button>
@@ -160,6 +163,7 @@ const UrlEntryItem = memo(function UrlEntryItem({
                 className="h-7 w-7 p-0 shrink-0"
                 onClick={() => addHeader(urlConfig.id)}
                 disabled={!headerKey.trim()}
+                aria-label="添加请求头"
               >
                 <Plus className="h-3 w-3" />
               </Button>
@@ -339,7 +343,7 @@ export function UrlInputPanel() {
             className="flex-1 h-7 text-xs min-w-0"
           />
 
-          <Button size="sm" onClick={handleAddSingle} disabled={!singleUrl.trim()} className="h-7 w-7 p-0 shrink-0">
+          <Button size="sm" onClick={handleAddSingle} disabled={!singleUrl.trim()} className="h-7 w-7 p-0 shrink-0" aria-label="添加URL">
             <Plus className="h-3.5 w-3.5" />
           </Button>
         </div>

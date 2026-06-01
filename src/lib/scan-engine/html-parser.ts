@@ -584,8 +584,9 @@ export function parseHtml(html: string, baseUrl: string, disabledRules: string[]
   }
 
   // 10d. Hidden text detection (same color as background, zero font-size)
+  // Only iterate elements with inline styles — much faster than $('*').each()
   if (ruleEnabled('hidden_text')) {
-  $('*').each((_, el) => {
+  $('[style]').each((_, el) => {
     const $el = $(el);
     const style = ($el.attr('style') || '').replace(/\s+/g, ' ').trim();
 
@@ -676,17 +677,83 @@ export function parseHtml(html: string, baseUrl: string, disabledRules: string[]
   }
 
   // 10f. Hidden divs with links (0x0 divs containing links)
+  // Detects various CSS hiding techniques used to conceal dark links
   if (ruleEnabled('hidden_div_link')) {
   $('div, span, p').each((_, el) => {
     const $el = $(el);
     const style = ($el.attr('style') || '').replace(/\s+/g, ' ').trim().toLowerCase();
 
-    // Check for zero-size containers with links
-    const isZeroDiv = /\b(width|height)\s*:\s*0(px)?\b/.test(style) ||
-      /\bdisplay\s*:\s*none\b/.test(style) ||
-      /\boverflow\s*:\s*hidden\b/.test(style) && /\b(width|height)\s*:\s*[01](px)?\b/.test(style);
+    // Check for various CSS hiding techniques
+    const hideTechniques: string[] = [];
 
-    if (isZeroDiv) {
+    // 1. display:none (original check)
+    if (/\bdisplay\s*:\s*none\b/.test(style)) {
+      hideTechniques.push('display:none');
+    }
+
+    // 2. Zero-size containers (original check)
+    if (/\b(width|height)\s*:\s*0(px)?\b/.test(style)) {
+      hideTechniques.push('尺寸为0');
+    }
+
+    // 3. overflow:hidden + small size (original check)
+    if (/\boverflow\s*:\s*hidden\b/.test(style) && /\b(width|height)\s*:\s*[01](px)?\b/.test(style)) {
+      hideTechniques.push('overflow:hidden+小尺寸');
+    }
+
+    // 4. visibility:hidden
+    if (/\bvisibility\s*:\s*hidden\b/.test(style)) {
+      hideTechniques.push('visibility:hidden');
+    }
+
+    // 5. opacity:0 (exactly 0, not 0.5 etc)
+    const opacityMatch = style.match(/\bopacity\s*:\s*([0-9.]+)/);
+    if (opacityMatch && parseFloat(opacityMatch[1]) === 0) {
+      hideTechniques.push('opacity:0');
+    }
+
+    // 6. text-indent with value <= -999
+    const textIndentMatch = style.match(/\btext-indent\s*:\s*(-[\d.]+)\s*(px|em|rem)?/);
+    if (textIndentMatch && parseFloat(textIndentMatch[1]) <= -999) {
+      hideTechniques.push(`text-indent:${textIndentMatch[1]}${textIndentMatch[2] || 'px'}`);
+    }
+
+    // 7. position:absolute + left/top with large negative value (4+ digits)
+    const posAbsolute = /\bposition\s*:\s*absolute\b/.test(style);
+    if (posAbsolute) {
+      const leftMatch = style.match(/\bleft\s*:\s*(-[\d.]+)\s*(px|em|rem)?/);
+      const topMatch = style.match(/\btop\s*:\s*(-[\d.]+)\s*(px|em|rem)?/);
+      if ((leftMatch && Math.abs(parseFloat(leftMatch[1])) >= 9999) ||
+          (topMatch && Math.abs(parseFloat(topMatch[1])) >= 9999)) {
+        const parts: string[] = [];
+        if (leftMatch && Math.abs(parseFloat(leftMatch[1])) >= 9999) parts.push(`left:${leftMatch[1]}`);
+        if (topMatch && Math.abs(parseFloat(topMatch[1])) >= 9999) parts.push(`top:${topMatch[1]}`);
+        hideTechniques.push(`position:absolute+${parts.join('+')}`);
+      }
+    }
+
+    // 8. clip: rect(0 or clip-path: inset(100%) or clip-path: polygon(0
+    if (/\bclip\s*:\s*rect\s*\(\s*0/i.test(style)) {
+      hideTechniques.push('clip:rect(0');
+    }
+    if (/\bclip-path\s*:\s*inset\s*\(\s*100%/i.test(style)) {
+      hideTechniques.push('clip-path:inset(100%)');
+    }
+    if (/\bclip-path\s*:\s*polygon\s*\(\s*0/i.test(style)) {
+      hideTechniques.push('clip-path:polygon(0');
+    }
+
+    // 9. transform: scale(0)
+    if (/\btransform\s*:\s*scale\s*\(\s*0\s*\)/.test(style)) {
+      hideTechniques.push('transform:scale(0)');
+    }
+
+    // 10. max-height:0 + overflow:hidden
+    if (/\bmax-height\s*:\s*0(px)?\b/.test(style) && /\boverflow\s*:\s*hidden\b/.test(style)) {
+      hideTechniques.push('max-height:0+overflow:hidden');
+    }
+
+    if (hideTechniques.length > 0) {
       const links = $el.find('a[href]');
       links.each((__, linkEl) => {
         const href = $(linkEl).attr('href');
@@ -704,7 +771,7 @@ export function parseHtml(html: string, baseUrl: string, disabledRules: string[]
             type: 'hidden_div_link',
             severity: 'critical',
             description: '隐藏容器(div/span/p)中的链接 — 疑似暗链',
-            evidence: `CSS属性: ${style.substring(0, 100)}, 隐藏原因: ${/\bdisplay\s*:\s*none\b/.test(style) ? 'display:none' : /\b(width|height)\s*:\s*0/.test(style) ? '尺寸为0' : 'overflow:hidden+小尺寸'}, link_href="${href}"`,
+            evidence: `CSS属性: ${style.substring(0, 100)}, 隐藏原因: ${hideTechniques.join(', ')}, link_href="${href}"`,
           });
         }
       });
@@ -712,7 +779,9 @@ export function parseHtml(html: string, baseUrl: string, disabledRules: string[]
   });
   }
 
-  // 10g. 0x0 iframes (additional check beyond existing hidden iframe detection)
+  // 10g. Hidden iframes — expanded detection beyond basic display:none / visibility:hidden
+  // Detects: 0x0/1x1 size, clip/clip-path hiding, offscreen positioning,
+  // sandbox without allow-scripts, and aria-hidden + tabindex="-1"
   if (ruleEnabled('iframe_hidden')) {
   $('iframe').each((_, el) => {
     const src = $(el).attr('src');
@@ -724,9 +793,53 @@ export function parseHtml(html: string, baseUrl: string, disabledRules: string[]
     const height = $(el).attr('height') || '';
     const style = ($(el).attr('style') || '').replace(/\s+/g, '').toLowerCase();
 
-    // Check for 0x0 or 1x1 iframes (even without explicit display:none)
+    const hideReasons: string[] = [];
+
+    // Check 1: 0x0 or 1x1 size (even without explicit display:none)
     if ((width === '0' || width === '1' || height === '0' || height === '1') ||
         (style.includes('width:0') || style.includes('width:1') || style.includes('height:0') || style.includes('height:1'))) {
+      hideReasons.push(`尺寸隐藏: ${width}x${height}`);
+    }
+
+    // Check 2: clip: rect(0,0,0,0) or clip-path: inset(100%)
+    if (/\bclip\s*:\s*rect\s*\(\s*0/i.test(style)) {
+      hideReasons.push('clip:rect(0)');
+    }
+    if (/\bclip-path\s*:\s*inset\s*\(\s*100%/i.test(style)) {
+      hideReasons.push('clip-path:inset(100%)');
+    }
+
+    // Check 3: position:absolute + offscreen (left/top: -9999px or similar)
+    if (/\bposition\s*:\s*absolute\b/.test(style)) {
+      const leftMatch = style.match(/\bleft\s*:\s*(-[\d.]+)/);
+      const topMatch = style.match(/\btop\s*:\s*(-[\d.]+)/);
+      if ((leftMatch && Math.abs(parseFloat(leftMatch[1])) >= 9999) ||
+          (topMatch && Math.abs(parseFloat(topMatch[1])) >= 9999)) {
+        const parts: string[] = [];
+        if (leftMatch && Math.abs(parseFloat(leftMatch[1])) >= 9999) parts.push(`left:${leftMatch[1]}`);
+        if (topMatch && Math.abs(parseFloat(topMatch[1])) >= 9999) parts.push(`top:${topMatch[1]}`);
+        hideReasons.push(`离屏定位: position:absolute+${parts.join('+')}`);
+      }
+    }
+
+    // Check 4: sandbox attribute without allow-scripts (content loads but JS restricted/invisible)
+    const sandboxAttr = $(el).attr('sandbox');
+    if (sandboxAttr !== undefined && sandboxAttr !== '') {
+      // sandbox attribute exists — check if allow-scripts is present
+      const sandboxTokens = sandboxAttr.toLowerCase().split(/\s+/);
+      if (!sandboxTokens.includes('allow-scripts')) {
+        hideReasons.push('sandbox无allow-scripts');
+      }
+    }
+
+    // Check 5: aria-hidden="true" combined with tabindex="-1"
+    const ariaHidden = ($(el).attr('aria-hidden') || '').toLowerCase() === 'true';
+    const tabindex = $(el).attr('tabindex');
+    if (ariaHidden && tabindex === '-1') {
+      hideReasons.push('aria-hidden=true+tabindex=-1');
+    }
+
+    if (hideReasons.length > 0) {
       const dlDomain = extractDomain(resolvedUrl);
       const dedupKey = `${dlDomain}|iframe_hidden`;
       if (!darkLinkSeen.has(dedupKey)) {
@@ -736,8 +849,8 @@ export function parseHtml(html: string, baseUrl: string, disabledRules: string[]
           tag: 'iframe',
           type: 'iframe_hidden',
           severity: 'critical',
-          description: '检测到0x0或1x1的iframe — 典型暗链手法',
-          evidence: `发现于<iframe>标签, 尺寸: ${width}x${height}, src="${src}"`,
+          description: '检测到隐藏iframe — 可能用于暗链',
+          evidence: `发现于<iframe>标签, 隐藏原因: ${hideReasons.join(', ')}, src="${src}" width="${width || 'auto'}" height="${height || 'auto'}"`,
         });
       }
     }
@@ -860,8 +973,10 @@ export function parseHtml(html: string, baseUrl: string, disabledRules: string[]
 
   // ─── 10l. rel="nofollow" suspicious link detection ──────────────────────────
   // Links with rel="nofollow" pointing to external domains are suspicious:
-  // the site owner doesn't want search engines to follow these links
-  // Only flag if domain is NOT in trusted whitelist
+  // the site owner doesn't want search engines to follow these links.
+  // Only flag at medium severity if context indicators are present (cheap TLD,
+  // URL shortener, hidden link, suspicious domain, malicious keyword).
+  // Without context indicators, still report at low severity.
   if (ruleEnabled('nofollow_suspicious')) {
   $('a[rel~="nofollow"]').each((_, el) => {
     const href = $(el).attr('href');
@@ -875,15 +990,39 @@ export function parseHtml(html: string, baseUrl: string, disabledRules: string[]
       const text = $(el).text().trim();
       const dedupKey = `${domain}|nofollow_suspicious`;
       if (!darkLinkSeen.has(dedupKey)) {
+        // Check for suspicious context indicators
+        const tld = domain.split('.').pop()?.toLowerCase() || '';
+        const hasCheapTld = CHEAP_TLDS_SET.has(tld) && !LEGIT_CHEAP_TLD_DOMAINS.has(domain);
+        const hasShortener = URL_SHORTENERS_SET.has(domain);
+        const visibility = analyzeVisibility($, el, 'a');
+        const isHidden = !visibility.isVisible;
+        const isSuspicious = isSuspiciousDomain(domain, baseDomain);
+        const urlLower = resolvedUrl.toLowerCase();
+        const hasMaliciousKeyword = MALICIOUS_KEYWORD_REGEX.test(urlLower);
+
+        const hasContextIndicator = hasCheapTld || hasShortener || isHidden || isSuspicious || hasMaliciousKeyword;
+
+        const indicators: string[] = [];
+        if (hasCheapTld) indicators.push(`廉价TLD(.${tld})`);
+        if (hasShortener) indicators.push('短链服务');
+        if (isHidden) indicators.push('隐藏元素');
+        if (isSuspicious) indicators.push('可疑域名(仿冒/错字)');
+        if (hasMaliciousKeyword) indicators.push('URL含恶意关键词');
+
+        const severity: Severity = hasContextIndicator ? 'medium' : 'low';
+        const descriptionSuffix = hasContextIndicator
+          ? ` — 伴随可疑指标: ${indicators.join(' + ')}`
+          : ' — 无额外可疑指标';
+
         darkLinkSeen.add(dedupKey);
         darkLinkDetails.push({
           url: resolvedUrl,
           tag: 'a',
           text: text || undefined,
           type: 'nofollow_suspicious',
-          severity: 'medium',
-          description: `外部链接带rel="nofollow"指向: ${domain} — 站长不希望搜索引擎追踪`,
-          evidence: `href="${href}" rel="nofollow" text="${text}"`,
+          severity,
+          description: `外部链接带rel="nofollow"指向: ${domain}${descriptionSuffix}`,
+          evidence: `href="${href}" rel="nofollow" text="${text}"${hasContextIndicator ? ` indicators=[${indicators.join(',')}]` : ''}`,
         });
       }
     }
@@ -893,7 +1032,7 @@ export function parseHtml(html: string, baseUrl: string, disabledRules: string[]
   // ─── 10m. Link farm detection ──────────────────────────────────────────────
   // Pages with unusually high number of external links to different domains
   // using cheap TLDs or shorteners are likely link farms
-  if (ruleEnabled('keyword_stuffing')) {
+  if (ruleEnabled('link_farm')) {
   {
     const externalDomainCount = urlDetails.filter(d => d.isExternal).length;
     if (externalDomainCount > 30) {
@@ -910,7 +1049,7 @@ export function parseHtml(html: string, baseUrl: string, disabledRules: string[]
           darkLinkDetails.push({
             url: baseUrl,
             tag: 'body',
-            type: 'keyword_stuffing',
+            type: 'link_farm',
             severity: 'high',
             description: `疑似链接农场: 页面含${externalDomainCount}个外链域名，其中${cheapOrShortener}个(${Math.round(ratio * 100)}%)使用廉价域名或短链`,
             evidence: `external_domains=${externalDomainCount} cheap_or_shortener=${cheapOrShortener} ratio=${ratio.toFixed(2)}`,
@@ -923,7 +1062,7 @@ export function parseHtml(html: string, baseUrl: string, disabledRules: string[]
 
   // ─── 10n. Mixed content hijacking ────────────────────────────────────────────
   // HTTPS pages loading HTTP resources (security downgrade risk)
-  if (ruleEnabled('meta_refresh') && baseUrl.startsWith('https://')) {
+  if (ruleEnabled('mixed_content') && baseUrl.startsWith('https://')) {
     const httpResources: string[] = [];
     for (const detail of urlDetails) {
       if (detail.url && detail.url.startsWith('http://')) {
@@ -940,7 +1079,7 @@ export function parseHtml(html: string, baseUrl: string, disabledRules: string[]
         darkLinkDetails.push({
           url: baseUrl,
           tag: 'mixed-content',
-          type: 'meta_refresh',
+          type: 'mixed_content',
           severity: 'high',
           description: `HTTPS页面加载${httpResources.length}个HTTP资源 — 可能被中间人攻击劫持`,
           evidence: `http_resources=${httpResources.length} examples=${httpResources.slice(0, 3).join(', ')}`,
@@ -959,6 +1098,14 @@ export function parseHtml(html: string, baseUrl: string, disabledRules: string[]
       { pattern: /String\.fromCharCode\s*\(/, name: 'String.fromCharCode()', desc: '使用字符编码构造URL' },
       { pattern: /unescape\s*\(/, name: 'unescape()', desc: '使用URL解码隐藏内容' },
       { pattern: /decodeURIComponent\s*\(/, name: 'decodeURIComponent()', desc: '使用URI解码构造URL' },
+      // Additional obfuscation patterns
+      { pattern: /\bsetTimeout\s*\(\s*["']/, name: 'setTimeout(string)', desc: '使用setTimeout执行字符串代码' },
+      { pattern: /\bsetInterval\s*\(\s*["']/, name: 'setInterval(string)', desc: '使用setInterval执行字符串代码' },
+      { pattern: /\bnew\s+Function\s*\(/, name: 'new Function()', desc: '使用new Function()动态构造函数' },
+      { pattern: /\bdocument\.write\s*\(/, name: 'document.write()', desc: '使用document.write()动态写入内容' },
+      { pattern: /\\x[0-9a-f]{2}.*\\x[0-9a-f]{2}/i, name: 'hex_encoding', desc: '使用十六进制编码字符串(\\x68\\x74\\x74\\x70)' },
+      { pattern: /\\u[0-9a-f]{4}.*\\u[0-9a-f]{4}/i, name: 'unicode_escape', desc: '使用Unicode转义编码字符串(\\u0068\\u0074)' },
+      { pattern: /\bparseInt\s*\(\s*["'][0-9a-f]+["']/i, name: 'parseInt(hex)', desc: '使用parseInt解析十六进制字符串构造URL' },
     ];
 
     $('script').each((_, el) => {

@@ -17,7 +17,17 @@ export type DetectionRuleKey =
   | 'cheap_tld'
   | 'hidden_text'
   | 'keyword_stuffing'
-  | 'hidden_div_link';
+  | 'hidden_div_link'
+  | 'base_redirect'
+  | 'meta_refresh'
+  | 'form_hijack'
+  | 'svg_hidden'
+  | 'nofollow_suspicious'
+  | 'link_farm'
+  | 'mixed_content'
+  | 'data_uri'
+  | 'noscript_hidden'
+  | 'js_obfuscated';
 
 // Threat intel API source keys
 export type ThreatIntelSourceKey = 'threatbook' | 'virustotal' | 'abuseipdb' | 'shodan';
@@ -45,6 +55,16 @@ const DEFAULT_SETTINGS: Settings = {
     hidden_text: true,
     keyword_stuffing: true,
     hidden_div_link: true,
+    base_redirect: true,
+    meta_refresh: true,
+    form_hijack: true,
+    svg_hidden: true,
+    nofollow_suspicious: true,
+    link_farm: true,
+    mixed_content: true,
+    data_uri: true,
+    noscript_hidden: true,
+    js_obfuscated: true,
   },
   threatIntelApis: {
     threatbook: '',

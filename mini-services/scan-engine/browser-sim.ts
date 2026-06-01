@@ -2,6 +2,8 @@
 // Each fingerprint includes UA, Accept-Language, viewport, and platform info
 // to make concurrent scan threads look like different real browsers.
 
+import { lookup } from 'dns/promises';
+
 // ─── Fingerprint Types ─────────────────────────────────────────────────────
 
 export interface BrowserFingerprint {
@@ -190,6 +192,57 @@ export function getResourceHeaders(
   return headers;
 }
 
+// ─── SSRF Protection (inline) ──────────────────────────────────────────────
+// Inline copy of validateResolvedIP from src/lib/security.ts for the mini-service
+// which cannot import from the main src/ directory.
+
+const PRIVATE_IP_RANGES_INLINE = [
+  { start: 10 * 256 ** 3, end: 10 * 256 ** 3 + 255 * 256 ** 2 + 255 * 256 + 255 },
+  { start: 172 * 256 ** 3 + 16 * 256 ** 2, end: 172 * 256 ** 3 + 31 * 256 ** 2 + 255 * 256 + 255 },
+  { start: 192 * 256 ** 3 + 168 * 256 ** 2, end: 192 * 256 ** 3 + 168 * 256 ** 2 + 255 * 256 + 255 },
+  { start: 127 * 256 ** 3, end: 127 * 256 ** 3 + 255 * 256 ** 2 + 255 * 256 + 255 },
+  { start: 169 * 256 ** 3 + 254 * 256 ** 2, end: 169 * 256 ** 3 + 254 * 256 ** 2 + 255 * 256 + 255 },
+  { start: 0, end: 255 * 256 ** 2 + 255 * 256 + 255 },
+];
+
+function ipToNumberInline(ip: string): number {
+  const parts = ip.split('.').map(Number);
+  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+}
+
+function isPrivateIPInline(ip: string): boolean {
+  const num = ipToNumberInline(ip);
+  return PRIVATE_IP_RANGES_INLINE.some(range => num >= range.start && num <= range.end);
+}
+
+function isValidIPInline(ip: string): boolean {
+  const parts = ip.split('.');
+  if (parts.length !== 4) return false;
+  for (const part of parts) {
+    if (part.length > 1 && part.startsWith('0')) return false;
+    const num = parseInt(part, 10);
+    if (isNaN(num) || num < 0 || num > 255) return false;
+    if (part !== String(num)) return false;
+  }
+  return true;
+}
+
+/** Validate a DNS-resolved IP — returns true if safe (public), false if private/reserved. */
+function validateResolvedIPInline(ip: string): boolean {
+  if (ip.includes(':')) {
+    // IPv6: check loopback, unique-local, link-local
+    if (ip === '::1') return false;
+    if (/^f[cd]/i.test(ip)) return false;   // fc00::/7 unique-local
+    if (/^fe[89ab]/i.test(ip)) return false; // fe80::/10 link-local
+    // IPv4-mapped IPv6
+    const v4Mapped = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+    if (v4Mapped) return !isPrivateIPInline(v4Mapped[1]);
+    return true;
+  }
+  if (isValidIPInline(ip)) return !isPrivateIPInline(ip);
+  return false;
+}
+
 // ─── Redirect Handling ─────────────────────────────────────────────────────
 
 // Maximum number of redirects to follow
@@ -266,6 +319,21 @@ export async function fetchWithRedirectControl(
       if (redirectUrl === currentUrl) {
         console.warn(`Redirect loop detected: ${currentUrl}`);
         return { response, finalUrl: currentUrl, redirectCount };
+      }
+
+      // SSRF protection: validate redirect target's DNS resolution
+      // Prevent redirects to private/reserved IPs (DNS rebinding via redirect)
+      try {
+        const redirectHost = new URL(redirectUrl).hostname;
+        if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(redirectHost)) {
+          const { address } = await lookup(redirectHost);
+          if (!validateResolvedIPInline(address)) {
+            console.warn(`Redirect to private IP blocked: ${redirectHost} -> ${address}`);
+            return { response, finalUrl: currentUrl, redirectCount };
+          }
+        }
+      } catch {
+        // DNS lookup failed — let it proceed, the fetch will fail on its own
       }
 
       // For 301/302/303, change method to GET (browser behavior)

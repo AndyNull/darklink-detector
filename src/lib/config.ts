@@ -33,10 +33,15 @@ export interface DatabaseConfig {
 }
 
 export interface ScanConfig {
+  /** Maximum number of URLs scanned concurrently */
   defaultConcurrency: number;
+  /** Default timeout in SECONDS (will be converted to ms internally by {@link getScanConfigMs}) */
   defaultTimeout: number;
+  /** Maximum number of external JS resources to fetch per page */
   maxExternalJs: number;
+  /** Maximum number of external CSS resources to fetch per page */
   maxExternalCss: number;
+  /** Number of hours to retain completed scan tasks before cleanup */
   taskRetentionHours: number;
 }
 
@@ -101,7 +106,7 @@ const DEFAULT_CONFIG: AppConfigFile = {
   },
   app: {
     title: 'DarkLink Detector',
-    version: '1.10.0',
+    version: '1.12.0',
     description: '网页暗链检测工具',
   },
   threatIntel: {
@@ -122,6 +127,70 @@ const DEFAULT_CONFIG: AppConfigFile = {
     },
   },
 };
+
+// ─── Config Validation ─────────────────────────────────────────────────────
+
+const VALID_DB_TYPES = new Set(['sqlite', 'mysql', 'postgresql']);
+
+/**
+ * Validate an AppConfigFile and return a corrected copy with invalid values
+ * replaced by their defaults. Logs warnings for each invalid value found.
+ */
+export function validateConfig(config: AppConfigFile): AppConfigFile {
+  const corrected = deepMerge({}, config) as AppConfigFile;
+  let hasChanges = false;
+
+  // Validate scan.defaultTimeout (1–300 seconds)
+  if (typeof corrected.scan.defaultTimeout !== 'number' || corrected.scan.defaultTimeout < 1 || corrected.scan.defaultTimeout > 300) {
+    console.warn(
+      `[Config] scan.defaultTimeout=${corrected.scan.defaultTimeout} is invalid (must be 1–300), using default ${DEFAULT_CONFIG.scan.defaultTimeout}`
+    );
+    corrected.scan.defaultTimeout = DEFAULT_CONFIG.scan.defaultTimeout;
+    hasChanges = true;
+  }
+
+  // Validate scan.taskRetentionHours (>= 1)
+  if (typeof corrected.scan.taskRetentionHours !== 'number' || corrected.scan.taskRetentionHours < 1) {
+    console.warn(
+      `[Config] scan.taskRetentionHours=${corrected.scan.taskRetentionHours} is invalid (must be >= 1), using default ${DEFAULT_CONFIG.scan.taskRetentionHours}`
+    );
+    corrected.scan.taskRetentionHours = DEFAULT_CONFIG.scan.taskRetentionHours;
+    hasChanges = true;
+  }
+
+  // Validate database.type
+  if (!VALID_DB_TYPES.has(corrected.database.type)) {
+    console.warn(
+      `[Config] database.type="${corrected.database.type}" is invalid (must be one of ${[...VALID_DB_TYPES].join(', ')}), using default "${DEFAULT_CONFIG.database.type}"`
+    );
+    corrected.database.type = DEFAULT_CONFIG.database.type;
+    hasChanges = true;
+  }
+
+  // Validate mysql.poolSize (1–50) when applicable
+  if (typeof corrected.database.mysql.poolSize !== 'number' || corrected.database.mysql.poolSize < 1 || corrected.database.mysql.poolSize > 50) {
+    console.warn(
+      `[Config] database.mysql.poolSize=${corrected.database.mysql.poolSize} is invalid (must be 1–50), using default ${DEFAULT_CONFIG.database.mysql.poolSize}`
+    );
+    corrected.database.mysql.poolSize = DEFAULT_CONFIG.database.mysql.poolSize;
+    hasChanges = true;
+  }
+
+  // Validate postgresql.poolSize (1–50) when applicable
+  if (typeof corrected.database.postgresql.poolSize !== 'number' || corrected.database.postgresql.poolSize < 1 || corrected.database.postgresql.poolSize > 50) {
+    console.warn(
+      `[Config] database.postgresql.poolSize=${corrected.database.postgresql.poolSize} is invalid (must be 1–50), using default ${DEFAULT_CONFIG.database.postgresql.poolSize}`
+    );
+    corrected.database.postgresql.poolSize = DEFAULT_CONFIG.database.postgresql.poolSize;
+    hasChanges = true;
+  }
+
+  if (hasChanges) {
+    console.warn('[Config] Some invalid values were corrected — see warnings above');
+  }
+
+  return corrected;
+}
 
 // ─── Config Loader ───────────────────────────────────────────────────────────
 
@@ -211,7 +280,8 @@ export function loadConfig(): AppConfigFile {
   try {
     const content = readFileSync(configPath, 'utf-8');
     const parsed = parseYamlSimple(content);
-    _cachedConfig = deepMerge(DEFAULT_CONFIG, parsed);
+    const merged = deepMerge(DEFAULT_CONFIG, parsed);
+    _cachedConfig = validateConfig(merged);
     return _cachedConfig!;
   } catch (err) {
     console.warn('Failed to load config.yaml, using defaults:', err);
@@ -230,6 +300,23 @@ export function getDatabaseConfig(): DatabaseConfig {
 
 export function getScanConfig(): ScanConfig {
   return loadConfig().scan;
+}
+
+/**
+ * Get the scan config with timeout converted to MILLISECONDS.
+ *
+ * The config file stores `defaultTimeout` in **seconds** for human readability,
+ * but the scan engine expects milliseconds. This helper performs the conversion
+ * so callers don't have to remember to multiply by 1000.
+ *
+ * @returns A copy of ScanConfig with `defaultTimeout` in milliseconds
+ */
+export function getScanConfigMs(): ScanConfig & { defaultTimeout: number } {
+  const config = loadConfig().scan;
+  return {
+    ...config,
+    defaultTimeout: config.defaultTimeout * 1000,
+  };
 }
 
 export function getAppConfig(): AppConfig {

@@ -130,14 +130,16 @@ export const DETECTION_RULES: DetectionRule[] = [
   { id: 'base_redirect', name: 'Base标签重定向', description: 'base标签修改页面基准URL', defaultEnabled: true },
   // 高级检测
   { id: 'js_obfuscated', name: 'JS混淆检测', description: 'eval/atob/fromCharCode/unescape', defaultEnabled: true },
-  { id: 'meta_refresh', name: 'Meta刷新', description: 'meta refresh重定向/混合内容降级', defaultEnabled: true },
+  { id: 'meta_refresh', name: 'Meta刷新', description: 'meta refresh重定向', defaultEnabled: true },
+  { id: 'mixed_content', name: '混合内容', description: 'HTTPS页面加载HTTP资源(安全降级)', defaultEnabled: true },
   { id: 'form_hijack', name: '表单劫持', description: '表单提交至外部域名', defaultEnabled: true },
   { id: 'svg_hidden', name: 'SVG隐藏链接', description: 'SVG中的隐藏链接', defaultEnabled: false },
   // 恶意内容检测
   { id: 'malicious_keyword', name: '恶意关键词', description: 'URL包含赌博/钓鱼/色情/诈骗关键词', defaultEnabled: true },
   { id: 'suspicious_shortener', name: '可疑短链', description: 'bit.ly/t.cn等短链服务', defaultEnabled: true },
   { id: 'cheap_tld', name: '廉价域名', description: '.xyz/.top/.cc等易滥用顶级域名', defaultEnabled: true },
-  { id: 'keyword_stuffing', name: '关键词堆砌', description: 'Meta标签含多个恶意关键词/链接农场', defaultEnabled: true },
+  { id: 'keyword_stuffing', name: '关键词堆砌', description: 'Meta标签含多个恶意关键词', defaultEnabled: true },
+  { id: 'link_farm', name: '链接农场', description: '大量外链至廉价/短链域名', defaultEnabled: true },
   // 隐藏链接检测
   { id: 'hidden_text', name: '隐藏文本', description: '零字号或同色文本中的链接', defaultEnabled: true },
   { id: 'hidden_div_link', name: '隐藏容器链接', description: 'display:none容器中的链接', defaultEnabled: true },
@@ -151,8 +153,8 @@ export const DETECTION_RULES: DetectionRule[] = [
 export const RULE_CATEGORIES = [
   { label: 'CSS/样式隐藏', icon: FileCode, ruleIds: ['css_hidden', 'size_hidden', 'color_hidden', 'position_hidden', 'overflow_hidden'] },
   { label: '嵌入/注入检测', icon: Globe, ruleIds: ['iframe_hidden', 'suspicious_domain', 'qr_code', 'js_injected', 'base_redirect'] },
-  { label: '高级检测', icon: Shield, ruleIds: ['js_obfuscated', 'meta_refresh', 'form_hijack', 'svg_hidden'] },
-  { label: '恶意内容检测', icon: AlertTriangle, ruleIds: ['malicious_keyword', 'suspicious_shortener', 'cheap_tld', 'keyword_stuffing'] },
+  { label: '高级检测', icon: Shield, ruleIds: ['js_obfuscated', 'meta_refresh', 'mixed_content', 'form_hijack', 'svg_hidden'] },
+  { label: '恶意内容检测', icon: AlertTriangle, ruleIds: ['malicious_keyword', 'suspicious_shortener', 'cheap_tld', 'keyword_stuffing', 'link_farm'] },
   { label: '隐藏链接检测', icon: Eye, ruleIds: ['hidden_text', 'hidden_div_link', 'nofollow_suspicious'] },
   { label: '其他检测', icon: Info, ruleIds: ['data_uri', 'noscript_hidden'] },
 ];

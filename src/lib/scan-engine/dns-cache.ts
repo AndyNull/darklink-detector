@@ -15,6 +15,9 @@ interface DnsCacheEntry {
  */
 const DEFAULT_TTL_MS = 60_000;
 
+/** Maximum number of entries in the cache to prevent unbounded memory growth */
+const MAX_CACHE_SIZE = 1000;
+
 const cache = new Map<string, DnsCacheEntry>();
 
 // HMR-safe periodic cleanup of expired entries (every 5 minutes)
@@ -49,6 +52,20 @@ export async function cachedLookup(hostname: string, ttlMs: number = DEFAULT_TTL
     family: result.family,
     expiresAt: Date.now() + ttlMs,
   });
+
+  // LRU eviction: if cache exceeds max size, evict the entry closest to expiry
+  if (cache.size > MAX_CACHE_SIZE) {
+    let oldest: string | null = null;
+    let oldestExpiry = Infinity;
+    for (const [key, entry] of cache) {
+      if (entry.expiresAt < oldestExpiry) {
+        oldest = key;
+        oldestExpiry = entry.expiresAt;
+      }
+    }
+    if (oldest) cache.delete(oldest);
+  }
+
   return result;
 }
 

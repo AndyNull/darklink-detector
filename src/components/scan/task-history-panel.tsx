@@ -217,6 +217,7 @@ export function TaskHistoryPanel({ compact = false, onViewResults, onViewLogs, e
                       onClick={(e) => handleDelete(task.taskId, e)}
                       disabled={deletingTaskId === task.taskId}
                       title="删除"
+                      aria-label="删除"
                     >
                       {deletingTaskId === task.taskId ? (
                         <Loader2 className="h-2.5 w-2.5 animate-spin" />

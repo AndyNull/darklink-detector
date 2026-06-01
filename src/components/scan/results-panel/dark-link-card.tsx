@@ -45,7 +45,7 @@ export const DarkLinkCard = React.memo(function DarkLinkCard({ link, onCopy, cop
     const urlObj = new URL(link.url);
     displayDomain = urlObj.hostname;
     isSafe = isSafeDomain(displayDomain);
-  } catch {}
+  } catch(e) { console.warn('Error:', e); }
 
   const severityColors: Record<string, string> = {
     critical: 'bg-red-500/10 text-red-600 border-red-500/20',
@@ -103,6 +103,10 @@ export const DarkLinkCard = React.memo(function DarkLinkCard({ link, onCopy, cop
     data_uri: 'Data URI',
     svg_hidden: 'SVG隐藏',
     nofollow_suspicious: 'Nofollow外链',
+    link_farm: '链接农场',
+    mixed_content: '混合内容',
+    data_uri_link: 'Data URI链接',
+    noscript_hidden: 'Noscript隐藏',
   };
 
   // Determine shield icon style based on threat status
@@ -174,7 +178,7 @@ export const DarkLinkCard = React.memo(function DarkLinkCard({ link, onCopy, cop
           {/* Threat intel popover */}
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-3.5 w-3.5 p-0 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <Button variant="ghost" size="sm" className="h-3.5 w-3.5 p-0 shrink-0" onClick={(e) => e.stopPropagation()} aria-label="威胁情报">
                 <ShieldIcon className={`h-2.5 w-2.5 ${shieldColor}`} />
               </Button>
             </PopoverTrigger>
@@ -190,6 +194,7 @@ export const DarkLinkCard = React.memo(function DarkLinkCard({ link, onCopy, cop
             className="h-3.5 w-3.5 p-0 shrink-0 text-muted-foreground hover:text-foreground"
             onClick={(e) => { e.stopPropagation(); setVisitWarning(true); }}
             title="访问链接"
+            aria-label="访问链接"
           >
             <ExternalLink className="h-2 w-2" />
           </Button>
@@ -200,6 +205,7 @@ export const DarkLinkCard = React.memo(function DarkLinkCard({ link, onCopy, cop
             size="sm"
             className="h-3.5 w-3.5 p-0 shrink-0"
             onClick={(e) => { e.stopPropagation(); onCopy(link.url, e); }}
+            aria-label="复制"
           >
             {copiedUrl === link.url ? (
               <Check className="h-2 w-2 text-green-600" />

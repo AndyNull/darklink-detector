@@ -165,6 +165,11 @@ export function validateScanUrl(url: string): { valid: boolean; reason?: string 
       return { valid: false, reason: 'Localhost blocked' };
     }
 
+    // Block *.localhost subdomains
+    if (hostname.endsWith('.localhost')) {
+      return { valid: false, reason: 'Localhost subdomain is not allowed' };
+    }
+
     // Check if hostname is an IP
     if (isValidIP(hostname)) {
       if (isPrivateIP(hostname)) {

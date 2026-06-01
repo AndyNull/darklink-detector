@@ -900,7 +900,7 @@ async function collectVirusTotal(apiKey?: string): Promise<{ domains: string[]; 
                 const hostname = new URL(id).hostname;
                 if (IP_REGEX.test(hostname)) ips.push(hostname);
                 else domains.push(hostname);
-              } catch {}
+              } catch(e) { console.warn('Error:', e); }
             }
           }
         }

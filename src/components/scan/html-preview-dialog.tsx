@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -54,44 +54,89 @@ function escapeHtml(text: string): string {
     .replace(/\//g, '&#x2F;');
 }
 
-function highlightDarkLinks(html: string, darkLinks: DarkLinkHighlight[]): string {
-  if (darkLinks.length === 0) return escapeHtml(html);
+// Instead of dangerouslySetInnerHTML, render highlighted segments as React elements
+// to prevent XSS via attribute injection in title/class attributes
+function HighlightedHtml({ html, darkLinkDetails }: { html: string; darkLinkDetails: DarkLinkHighlight[] }) {
+  if (darkLinkDetails.length === 0) {
+    return <>{escapeHtml(html)}</>;
+  }
 
   const escaped = escapeHtml(html);
 
-  // Build a set of dark link URLs and domains to highlight
-  const darkUrls = new Set<string>();
-  const darkDomains = new Set<string>();
-  for (const dl of darkLinks) {
-    darkUrls.add(dl.url);
-    try {
-      darkDomains.add(new URL(dl.url).hostname);
-    } catch {}
-  }
+  // Build matches from dark links: find href attribute values that contain dark link URLs/domains
+  const matches: Array<{ start: number; end: number; colorClass: string; title: string }> = [];
 
-  // Highlight href attributes containing dark link URLs/domains
-  let result = escaped;
-
-  // Highlight href="..." that match dark link URLs or domains
-  for (const url of darkUrls) {
-    const escapedUrl = escapeHtml(url);
-    // Match href="...url..." patterns
+  for (const dl of darkLinkDetails) {
+    const escapedUrl = escapeHtml(dl.url);
     const hrefRegex = new RegExp(`(href=["'])([^"']*${escapedUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^"']*)(["'])`, 'gi');
-    result = result.replace(hrefRegex, '$1<span class="bg-red-500/20 text-red-600 dark:text-red-400 rounded px-0.5 border-b border-red-500/40" title="暗链: ' + escapeHtml(url) + '">$2</span>$3');
+    let m: RegExpExecArray | null;
+    while ((m = hrefRegex.exec(escaped)) !== null) {
+      matches.push({
+        start: m.index + m[1].length,
+        end: m.index + m[1].length + m[2].length,
+        colorClass: 'bg-red-500/20 text-red-600 dark:text-red-400 rounded px-0.5 border-b border-red-500/40',
+        title: `暗链: ${dl.url}`,
+      });
+    }
+
+    try {
+      const domain = new URL(dl.url).hostname;
+      const escapedDomain = escapeHtml(domain);
+      const domainRegex = new RegExp(`(href=["'])([^"']*${escapedDomain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^"']*)(["'])`, 'gi');
+      while ((m = domainRegex.exec(escaped)) !== null) {
+        // Check not already covered by URL match
+        const s = m.index + m[1].length;
+        const e = s + m[2].length;
+        const overlaps = matches.some(existing => s >= existing.start && s < existing.end);
+        if (!overlaps) {
+          matches.push({
+            start: s,
+            end: e,
+            colorClass: 'bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded px-0.5 border-b border-orange-500/40',
+            title: `可疑域名: ${escapedDomain}`,
+          });
+        }
+      }
+    } catch(e) { console.warn('Error:', e); }
   }
 
-  for (const domain of darkDomains) {
-    const escapedDomain = escapeHtml(domain);
-    // Match href="...domain..." patterns that aren't already highlighted
-    const domainRegex = new RegExp(`(href=["'])([^"']*${escapedDomain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^"']*)(["'])`, 'gi');
-    result = result.replace(domainRegex, (match, p1, p2, p3) => {
-      // Don't double-highlight
-      if (p2.includes('bg-red-500/20')) return match;
-      return `${p1}<span class="bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded px-0.5 border-b border-orange-500/40" title="可疑域名: ${escapedDomain}">${p2}</span>${p3}`;
-    });
+  // Sort matches by start position
+  matches.sort((a, b) => a.start - b.start);
+
+  // Build segments from matches
+  const segments: Array<{ text: string; highlight: boolean; title?: string; colorClass?: string }> = [];
+  let lastEnd = 0;
+  for (const match of matches) {
+    if (match.start > lastEnd) {
+      segments.push({ text: escaped.slice(lastEnd, match.start), highlight: false });
+    }
+    if (match.start >= lastEnd) {
+      segments.push({
+        text: escaped.slice(match.start, match.end),
+        highlight: true,
+        title: match.title,
+        colorClass: match.colorClass,
+      });
+    }
+    lastEnd = Math.max(lastEnd, match.end);
+  }
+  if (lastEnd < escaped.length) {
+    segments.push({ text: escaped.slice(lastEnd), highlight: false });
   }
 
-  return result;
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.highlight ? (
+          <span key={i} className={seg.colorClass} title={seg.title}>
+            {seg.text}
+          </span>
+        ) : (
+          <span key={i}>{seg.text}</span>
+        )
+      )}
+    </>
+  );
 }
 
 function getSeverityColor(severity: string): string {
@@ -117,18 +162,13 @@ export function HtmlPreviewDialog({
 }: HtmlPreviewDialogProps) {
   const [copiedHtml, setCopiedHtml] = useState(false);
 
-  const highlightedHtml = useMemo(() => {
-    if (!rawHtml) return '';
-    return highlightDarkLinks(rawHtml, darkLinkDetails);
-  }, [rawHtml, darkLinkDetails]);
-
   const handleCopyHtml = async () => {
     if (!rawHtml) return;
     try {
       await navigator.clipboard.writeText(rawHtml);
       setCopiedHtml(true);
       setTimeout(() => setCopiedHtml(false), 2000);
-    } catch {}
+    } catch(e) { console.warn('Error:', e); }
   };
 
   const htmlSize = rawHtml ? new Blob([rawHtml]).size : 0;
@@ -242,7 +282,7 @@ export function HtmlPreviewDialog({
                 </div>
               ) : rawHtml ? (
                 <pre className="text-[10px] leading-relaxed font-mono p-3 bg-muted/30 rounded-md whitespace-pre-wrap break-all">
-                  <code dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+                  <code><HighlightedHtml html={rawHtml} darkLinkDetails={darkLinkDetails} /></code>
                 </pre>
               ) : (
                 <div className="text-center py-8 text-muted-foreground text-xs">

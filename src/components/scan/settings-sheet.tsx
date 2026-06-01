@@ -40,6 +40,16 @@ const detectionRules: { key: DetectionRuleKey; label: string }[] = [
   { key: 'hidden_text', label: '隐藏文本检测' },
   { key: 'keyword_stuffing', label: '关键词堆砌检测' },
   { key: 'hidden_div_link', label: '隐藏DIV链接检测' },
+  { key: 'base_redirect', label: 'Base重定向检测' },
+  { key: 'meta_refresh', label: 'Meta刷新检测' },
+  { key: 'form_hijack', label: '表单劫持检测' },
+  { key: 'svg_hidden', label: 'SVG隐藏检测' },
+  { key: 'nofollow_suspicious', label: 'Nofollow外链检测' },
+  { key: 'link_farm', label: '链接农场检测' },
+  { key: 'mixed_content', label: '混合内容检测' },
+  { key: 'data_uri', label: 'Data URI链接检测' },
+  { key: 'noscript_hidden', label: 'Noscript隐藏检测' },
+  { key: 'js_obfuscated', label: 'JS混淆检测' },
 ];
 
 // Threat intel API source definitions - maps to database sourceId
@@ -91,6 +101,7 @@ function MaskedApiKeyInput({
           type="button"
           onClick={() => setVisible(!visible)}
           className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+          aria-label={visible ? '隐藏密钥' : '显示密钥'}
         >
           {visible ? (
             <EyeOff className="h-3 w-3" />

@@ -625,7 +625,7 @@ async function querySingleValue(type: string, value: string): Promise<any> {
         });
         threatIntelSources = sources.map(s => s.name);
       }
-    } catch {}
+    } catch(e) { console.warn('Error:', e); }
   }
 
   // --- Build response ---

@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
       if (typeof reqAny.waitUntil === 'function') {
         (reqAny.waitUntil as (promise: Promise<unknown>) => void)(scanPromise);
       }
-    } catch {}
+    } catch(e) { console.warn('Error:', e); }
 
     return NextResponse.json({ taskId, status: 'started' }, { status: 202 });
   } catch (err) {

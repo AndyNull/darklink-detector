@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef, Suspense } from 'react';
 import { useScanStore, type ScanResultItem } from '@/lib/scan-store';
 import { isSafeDomain } from '@/lib/safe-domain-whitelist';
+import { ErrorBoundary } from '@/components/error-boundary';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -121,7 +122,7 @@ export function ResultsPanel() {
         } else {
           domains.add(hostname);
         }
-      } catch {}
+      } catch (err) { console.warn('Error parsing URL hostname:', err); }
     }
 
     let cancelled = false;
@@ -162,7 +163,7 @@ export function ResultsPanel() {
             const data = await res.json();
             processMatches(data);
           }
-        } catch {}
+        } catch (err) { console.warn('Error checking malicious domains:', err); }
       }
 
       // Check IPs
@@ -180,7 +181,7 @@ export function ResultsPanel() {
             const data = await res.json();
             processMatches(data);
           }
-        } catch {}
+        } catch (err) { console.warn('Error checking malicious IPs:', err); }
       }
 
       if (!cancelled) {
@@ -213,7 +214,7 @@ export function ResultsPanel() {
                 confirmed.add(value);
               }
             }
-          } catch {}
+          } catch (err) { console.warn('Error checking threat intel:', err); }
         })();
 
         executing.add(p);
@@ -245,6 +246,18 @@ export function ResultsPanel() {
   const qrCodes = getFilteredQrCodes();
   const stats = getStats();
 
+  // ──── Pre-compute hostname map for all results (avoids repeated new URL() in JSX) ────
+  const allDarkLinkHostnames = useMemo(() => {
+    const map = new Map<string, string>();
+    const allLinks = results.flatMap(r => r.darkLinkDetails);
+    for (const link of allLinks) {
+      if (!map.has(link.url)) {
+        try { map.set(link.url, new URL(link.url).hostname); } catch { map.set(link.url, link.url); }
+      }
+    }
+    return map;
+  }, [results]);
+
   // ──── Severity count summary for dark-links tab ────
   // Compute on ALL dark links (unfiltered), matching the effectiveSeverity logic in DarkLinkCard
   const allDarkLinksUnfiltered = useMemo(() => {
@@ -253,15 +266,14 @@ export function ResultsPanel() {
     const domainMap = new Map<string, typeof allLinks[0]>();
     const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
     for (const link of allLinks) {
-      let hostname: string;
-      try { hostname = new URL(link.url).hostname; } catch { hostname = link.url; }
+      const hostname = allDarkLinkHostnames.get(link.url) || link.url;
       const existing = domainMap.get(hostname);
       if (!existing || (severityOrder[link.severity] ?? 99) < (severityOrder[existing.severity] ?? 99)) {
         domainMap.set(hostname, link);
       }
     }
     return [...domainMap.values()];
-  }, [results]);
+  }, [results, allDarkLinkHostnames]);
 
   const severityCounts = useMemo(() => {
     let critical = 0;
@@ -269,8 +281,7 @@ export function ResultsPanel() {
     let medium = 0;
     let safe = 0;
     for (const link of allDarkLinksUnfiltered) {
-      let hostname = link.url;
-      try { hostname = new URL(link.url).hostname; } catch {}
+      const hostname = allDarkLinkHostnames.get(link.url) || link.url;
       const inDB = maliciousMatches.has(hostname);
       const tiConfirmed = threatIntelConfirmed.has(hostname);
       const inSuspicious = suspiciousMatches.has(hostname);
@@ -291,7 +302,7 @@ export function ResultsPanel() {
       }
     }
     return { critical, high, medium, safe };
-  }, [allDarkLinksUnfiltered, maliciousMatches, threatIntelConfirmed, suspiciousMatches]);
+  }, [allDarkLinksUnfiltered, allDarkLinkHostnames, maliciousMatches, threatIntelConfirmed, suspiciousMatches]);
 
   // ──── Sorted dark links ────
   const sortedDarkLinks = useMemo(() => {
@@ -299,8 +310,7 @@ export function ResultsPanel() {
     if (darkLinkSort === 'severity') {
       sorted.sort((a, b) => {
         const getEffective = (link: typeof a) => {
-          let hostname = link.url;
-          try { hostname = new URL(link.url).hostname; } catch {}
+          const hostname = allDarkLinkHostnames.get(link.url) || link.url;
           if (isSafeDomain(hostname)) return 'safe';
           if (maliciousMatches.has(hostname)) return 'critical';
           if (threatIntelConfirmed.has(hostname)) return 'high';
@@ -312,16 +322,15 @@ export function ResultsPanel() {
       });
     } else if (darkLinkSort === 'domain') {
       sorted.sort((a, b) => {
-        let ha = a.url, hb = b.url;
-        try { ha = new URL(a.url).hostname; } catch {}
-        try { hb = new URL(b.url).hostname; } catch {}
+        const ha = allDarkLinkHostnames.get(a.url) || a.url;
+        const hb = allDarkLinkHostnames.get(b.url) || b.url;
         return ha.localeCompare(hb);
       });
     } else if (darkLinkSort === 'type') {
       sorted.sort((a, b) => a.type.localeCompare(b.type));
     }
     return sorted;
-  }, [darkLinks, darkLinkSort, maliciousMatches, threatIntelConfirmed]);
+  }, [darkLinks, darkLinkSort, allDarkLinkHostnames, maliciousMatches, threatIntelConfirmed]);
 
   const handlePreview = useCallback(async (result: ScanResultItem) => {
     // Immediately show the dialog with available data
@@ -354,7 +363,7 @@ export function ResultsPanel() {
       await navigator.clipboard.writeText(url);
       setCopiedUrl(url);
       setTimeout(() => setCopiedUrl(null), 2000);
-    } catch {}
+    } catch (err) { console.warn('Clipboard write failed:', err); }
   }, []);
 
   const handleExportResults = useCallback(() => {
@@ -385,7 +394,8 @@ export function ResultsPanel() {
       a.click();
       URL.revokeObjectURL(url);
       toast.success('结果已导出');
-    } catch {
+    } catch (err) {
+      console.warn('Export failed:', err);
       toast.error('导出失败');
     }
   }, [results, stats]);
@@ -397,7 +407,7 @@ export function ResultsPanel() {
       await navigator.clipboard.writeText(allTexts);
       setCopiedUrl('__bulk_qr__');
       setTimeout(() => setCopiedUrl(null), 2000);
-    } catch {}
+    } catch (err) { console.warn('Bulk QR copy failed:', err); }
   }, [qrCodes]);
 
   return (
@@ -450,52 +460,54 @@ export function ResultsPanel() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="all" className="flex-1 min-h-0 mt-0 overflow-y-auto custom-scrollbar px-2">
-          <Suspense fallback={<TabLoadingFallback />}>
-            <AllResultsTab
-              filteredResults={filteredResults}
-              copiedUrl={copiedUrl}
-              onCopy={handleCopyUrl}
-              onPreview={handlePreview}
-            />
-          </Suspense>
-        </TabsContent>
+        <ErrorBoundary>
+          <TabsContent value="all" className="flex-1 min-h-0 mt-0 overflow-y-auto custom-scrollbar px-2">
+            <Suspense fallback={<TabLoadingFallback />}>
+              <AllResultsTab
+                filteredResults={filteredResults}
+                copiedUrl={copiedUrl}
+                onCopy={handleCopyUrl}
+                onPreview={handlePreview}
+              />
+            </Suspense>
+          </TabsContent>
 
-        <TabsContent value="dark-links" className="flex-1 min-h-0 mt-0 overflow-y-auto custom-scrollbar px-2">
-          <Suspense fallback={<TabLoadingFallback />}>
-            <DarkLinksTab
-              darkLinks={darkLinks}
-              sortedDarkLinks={sortedDarkLinks}
-              darkLinkSort={darkLinkSort}
-              setDarkLinkSort={setDarkLinkSort}
-              severityFilter={severityFilter}
-              setSeverityFilter={setSeverityFilter}
-              severityCounts={severityCounts}
-              maliciousMatches={maliciousMatches}
-              suspiciousMatches={suspiciousMatches}
-              threatIntelConfirmed={threatIntelConfirmed}
-              copiedUrl={copiedUrl}
-              onCopy={handleCopyUrl}
-            />
-          </Suspense>
-        </TabsContent>
+          <TabsContent value="dark-links" className="flex-1 min-h-0 mt-0 overflow-y-auto custom-scrollbar px-2">
+            <Suspense fallback={<TabLoadingFallback />}>
+              <DarkLinksTab
+                darkLinks={darkLinks}
+                sortedDarkLinks={sortedDarkLinks}
+                darkLinkSort={darkLinkSort}
+                setDarkLinkSort={setDarkLinkSort}
+                severityFilter={severityFilter}
+                setSeverityFilter={setSeverityFilter}
+                severityCounts={severityCounts}
+                maliciousMatches={maliciousMatches}
+                suspiciousMatches={suspiciousMatches}
+                threatIntelConfirmed={threatIntelConfirmed}
+                copiedUrl={copiedUrl}
+                onCopy={handleCopyUrl}
+              />
+            </Suspense>
+          </TabsContent>
 
-        <TabsContent value="qr-codes" className="flex-1 min-h-0 mt-0 overflow-y-auto custom-scrollbar px-2">
-          <Suspense fallback={<TabLoadingFallback />}>
-            <QrCodesTab
-              qrCodes={qrCodes}
-              copiedUrl={copiedUrl}
-              onCopy={handleCopyUrl}
-              onBulkCopy={handleBulkCopyQrTexts}
-            />
-          </Suspense>
-        </TabsContent>
+          <TabsContent value="qr-codes" className="flex-1 min-h-0 mt-0 overflow-y-auto custom-scrollbar px-2">
+            <Suspense fallback={<TabLoadingFallback />}>
+              <QrCodesTab
+                qrCodes={qrCodes}
+                copiedUrl={copiedUrl}
+                onCopy={handleCopyUrl}
+                onBulkCopy={handleBulkCopyQrTexts}
+              />
+            </Suspense>
+          </TabsContent>
 
-        <TabsContent value="errors" className="flex-1 min-h-0 mt-0 overflow-y-auto custom-scrollbar px-2">
-          <Suspense fallback={<TabLoadingFallback />}>
-            <ErrorsTab results={results} />
-          </Suspense>
-        </TabsContent>
+          <TabsContent value="errors" className="flex-1 min-h-0 mt-0 overflow-y-auto custom-scrollbar px-2">
+            <Suspense fallback={<TabLoadingFallback />}>
+              <ErrorsTab results={results} />
+            </Suspense>
+          </TabsContent>
+        </ErrorBoundary>
       </Tabs>
 
       {/* HTML Preview Dialog — lazy-loaded, only fetched when user opens preview */}

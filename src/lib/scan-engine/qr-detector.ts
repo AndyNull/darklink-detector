@@ -2,6 +2,7 @@ import jsQR from 'jsqr';
 import sharp from 'sharp';
 import type { QrCodeData } from './types';
 import { getNextUserAgent } from './browser-sim';
+import { URL_SHORTENERS } from './shared-constants';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -29,13 +30,16 @@ const SUSPICIOUS_TLDS = new Set([
 ]);
 
 // ─── URL Shorteners ───────────────────────────────────────────────────────────
+// Imported from shared-constants.ts — single source of truth
+const URL_SHORTENER_HOSTS = new Set(URL_SHORTENERS);
 
-const URL_SHORTENER_HOSTS = new Set([
-  'bit.ly', 'tinyurl.com', 't.cn', 'dwz.cn', 'suolink.cn',
-  'is.gd', 'v.gd', 'ow.ly', 'rb.gy', 'shorturl.at',
-  'tny.im', 'soo.gd', 's2r.co', 'cutt.ly', 'shorte.st',
-  'adf.ly', 'bc.vc', 'ouo.io', 'sh.st', 'cli.re',
-]);
+// ─── Suspicious Keywords in QR URLs ──────────────────────────────────────────
+// Keywords commonly found in phishing/malicious QR code URLs
+const QR_SUSPICIOUS_KEYWORDS = [
+  'login', 'signin', 'verify', 'secure', 'account', 'update', 'confirm',
+  'wallet', 'crypto', 'bitcoin', 'payment', 'banking', 'credential',
+  'password', 'token', 'auth', 'reset', 'unlock', 'suspend',
+];
 
 // ─── Tracking Parameters ─────────────────────────────────────────────────────
 
@@ -475,8 +479,18 @@ export function isQrContentSuspicious(content: string): boolean {
     const parentDomain = hostnameLower.split('.').slice(-2).join('.');
     if (URL_SHORTENER_HOSTS.has(parentDomain)) return true;
 
-    // Very long URL
-    if (content.length > 300) return true;
+    // Very long URL — only suspicious if combined with another indicator
+    // (e.g. IP address URL, URL shortener, or suspicious keyword in the URL)
+    // Legitimate long URLs like Google Maps links should not be flagged
+    if (content.length > 500) {
+      const hasOtherIndicator =
+        /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(url.hostname) || // IP address
+        URL_SHORTENER_HOSTS.has(hostnameLower) ||                        // URL shortener
+        URL_SHORTENER_HOSTS.has(parentDomain) ||                         // URL shortener (parent)
+        (tld && SUSPICIOUS_TLDS.has(tld)) ||                             // Suspicious TLD
+        QR_SUSPICIOUS_KEYWORDS.some(kw => content.toLowerCase().includes(kw)); // Suspicious keyword
+      if (hasOtherIndicator) return true;
+    }
 
     // Tracking parameters
     const params = url.searchParams;
@@ -525,9 +539,17 @@ export function getQrSuspicionReason(content: string): string {
       return 'QR码包含短链接，可能隐藏真实目标地址';
     }
 
-    // Very long URL
-    if (content.length > 300) {
-      return 'QR码URL异常长，可能包含隐藏参数';
+    // Very long URL (only flagged when combined with another suspicious indicator)
+    if (content.length > 500) {
+      const hasOtherIndicator =
+        /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(url.hostname) ||
+        URL_SHORTENER_HOSTS.has(hostnameLower) ||
+        URL_SHORTENER_HOSTS.has(parentDomain) ||
+        (tld && SUSPICIOUS_TLDS.has(tld)) ||
+        QR_SUSPICIOUS_KEYWORDS.some(kw => content.toLowerCase().includes(kw));
+      if (hasOtherIndicator) {
+        return 'QR码URL异常长且包含可疑特征，可能包含隐藏参数';
+      }
     }
 
     // Tracking parameters

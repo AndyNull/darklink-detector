@@ -207,6 +207,9 @@ interface ScanStore {
   getFilteredQrCodes: () => QrCodeResult[];
   getStats: () => { totalUrls: number; darkLinks: number; qrCodes: number; errors: number; criticalLinks: number };
   getEstimatedTimeRemaining: () => string;
+
+  // Internal cache for getFilteredDarkLinks memoization
+  _darkLinksCache: { deps: { resultsRef: ScanResultItem[]; severityFilter: SeverityFilter; searchQuery: string } | null; result: DarkLinkResult[] };
 }
 
 let urlIdCounter = 0;
@@ -282,7 +285,8 @@ function parseCurl(curlStr: string): { url: string; method: string; headers: Rec
     if (!method) method = body ? 'POST' : 'GET';
 
     return { url, method, headers, body };
-  } catch {
+  } catch (err) {
+    console.warn('Store error:', err);
     return null;
   }
 }
@@ -309,6 +313,7 @@ export const useScanStore = create<ScanStore>((set, get) => ({
   sublinkDepth: 2,
   sublinkStatus: 'idle',
   sublinkProgress: null,
+  _darkLinksCache: { deps: null, result: [] },
 
   addUrl: (url, method = 'GET', headers = {}, body = '') => {
     const id = `url-${++urlIdCounter}`;
@@ -333,7 +338,7 @@ export const useScanStore = create<ScanStore>((set, get) => ({
       } else if (data.url) {
         newUrls.push({ id: `url-${++urlIdCounter}`, url: data.url, method: data.method || 'GET', headers: data.headers || {}, body: data.body || '', enabled: true });
       }
-    } catch {}
+    } catch (err) { console.warn('Store error:', err); }
 
     if (!parsedAsJson) {
       const lines = urlsText.split('\n');
@@ -361,7 +366,7 @@ export const useScanStore = create<ScanStore>((set, get) => ({
               newUrls.push({ id: `url-${++urlIdCounter}`, url: parsed.url, method: parsed.method || 'GET', headers: parsed.headers || {}, body: parsed.body || '', enabled: true });
               continue;
             }
-          } catch {}
+          } catch (err) { console.warn('Store error:', err); }
           // Plain URL
           newUrls.push({ id: `url-${++urlIdCounter}`, url: line, method: 'GET', headers: {}, body: '', enabled: true });
         }
@@ -431,6 +436,7 @@ export const useScanStore = create<ScanStore>((set, get) => ({
     urls: [],
     sublinkStatus: 'idle',
     sublinkProgress: null,
+    _darkLinksCache: { deps: null, result: [] },
   }),
 
   loadTaskResults: async (taskId: string) => {
@@ -486,7 +492,20 @@ export const useScanStore = create<ScanStore>((set, get) => ({
   },
 
   getFilteredDarkLinks: () => {
-    const { results, severityFilter, searchQuery } = get();
+    const { results, severityFilter, searchQuery, _darkLinksCache } = get();
+
+    // Check if dependencies have changed since last computation
+    const depsChanged =
+      !_darkLinksCache.deps ||
+      _darkLinksCache.deps.resultsRef !== results ||
+      _darkLinksCache.deps.severityFilter !== severityFilter ||
+      _darkLinksCache.deps.searchQuery !== searchQuery;
+
+    if (!depsChanged) {
+      return _darkLinksCache.result;
+    }
+
+    // Recompute
     let allLinks = results.flatMap(r => r.darkLinkDetails);
 
     // Filter by effective severity (consistent with display logic)
@@ -533,7 +552,12 @@ export const useScanStore = create<ScanStore>((set, get) => ({
       }
     }
 
-    return [...domainMap.values()];
+    const result = [...domainMap.values()];
+
+    // Update cache
+    set({ _darkLinksCache: { deps: { resultsRef: results, severityFilter, searchQuery }, result } });
+
+    return result;
   },
 
   getFilteredQrCodes: () => {

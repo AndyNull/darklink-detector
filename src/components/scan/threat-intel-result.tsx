@@ -31,7 +31,7 @@ export function ThreatIntelResult({ type, value }: { type: 'domain' | 'ip'; valu
       if (res.ok) {
         setAdded(true);
       }
-    } catch {}
+    } catch(e) { console.warn('Error:', e); }
     setAdding(false);
   };
 

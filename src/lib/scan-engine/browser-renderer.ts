@@ -276,7 +276,7 @@ export async function renderPageForImages(
           if (dataUrl && dataUrl.length > 100) {
             dataSrc.push(dataUrl);
           }
-        } catch {}
+        } catch(e) { console.warn('Error:', e); }
       }
 
       // 5. <source> elements in <picture>
@@ -322,13 +322,13 @@ export async function renderPageForImages(
         try {
           const pageUrl = new URL(result.finalUrl);
           resolvedUrls.push(`${pageUrl.origin}${rawUrl}`);
-        } catch {}
+        } catch(e) { console.warn('Error:', e); }
       } else if (rawUrl.startsWith('./') || !rawUrl.startsWith('/')) {
         // Relative URL
         try {
           const resolved = new URL(rawUrl, result.finalUrl).href;
           resolvedUrls.push(resolved);
-        } catch {}
+        } catch(e) { console.warn('Error:', e); }
       }
     }
 
@@ -365,10 +365,10 @@ export async function renderPageForImages(
     // Clean up
     try {
       if (page && !page.isClosed()) await page.close();
-    } catch {}
+    } catch(e) { console.warn('Error:', e); }
     try {
       if (context) await context.close();
-    } catch {}
+    } catch(e) { console.warn('Error:', e); }
     pageSemaphore.release();
   }
 
@@ -382,7 +382,7 @@ export async function closeBrowser(): Promise<void> {
   if (_browser) {
     try {
       await _browser.close();
-    } catch {}
+    } catch(e) { console.warn('Error:', e); }
     _browser = null;
   }
 }

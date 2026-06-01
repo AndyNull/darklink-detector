@@ -3,6 +3,7 @@
 export interface ScanRequest {
   urls: UrlConfig[];
   concurrency?: number;
+  /** Timeout per URL in MILLISECONDS (default: 15000). Config stores seconds; use getScanConfigMs() for conversion. */
   timeout?: number;
   taskName?: string;
   disabledRules?: string[]; // rule IDs to skip during scan
@@ -81,6 +82,8 @@ export type DarkLinkType =
   | 'form_hijack'
   | 'svg_hidden'
   | 'nofollow_suspicious'
+  | 'link_farm'
+  | 'mixed_content'
   | 'data_uri_link'
   | 'noscript_hidden';
 

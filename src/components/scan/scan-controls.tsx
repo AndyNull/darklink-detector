@@ -300,7 +300,7 @@ export function CompactScanControls({ onReset }: { onReset?: () => void }) {
           .filter(([, enabled]) => !enabled)
           .map(([key]) => key);
       }
-    } catch {}
+    } catch(e) { console.warn('Error:', e); }
 
     try {
       await startScan(newTaskId, {
@@ -379,7 +379,7 @@ export function CompactScanControls({ onReset }: { onReset?: () => void }) {
     if (taskId) {
       try {
         await stopScan(taskId);
-      } catch {}
+      } catch(e) { console.warn('Error:', e); }
       if (pollRef.current) {
         pollRef.current.stop();
         pollRef.current = null;
@@ -663,7 +663,7 @@ function GlobalSettingsPopover({
               <div key={key} className="flex gap-1 items-center h-7">
                 <Input className="h-7 text-[11px] font-mono flex-1 min-w-0" value={key} readOnly />
                 <Input className="h-7 text-[11px] font-mono flex-1 min-w-0" value={value} readOnly />
-                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeHeader(key)}>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeHeader(key)} aria-label="删除请求头">
                   <X className="h-3 w-3" />
                 </Button>
               </div>
@@ -685,7 +685,7 @@ function GlobalSettingsPopover({
                 onChange={(e) => setNewValue(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addHeader()}
               />
-              <Button variant="outline" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={addHeader} disabled={!newKey.trim()}>
+              <Button variant="outline" size="sm" className="h-7 w-7 p-0 shrink-0" onClick={addHeader} disabled={!newKey.trim()} aria-label="添加请求头">
                 <Plus className="h-3 w-3" />
               </Button>
             </div>
