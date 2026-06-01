@@ -5,6 +5,7 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
+import { APP_VERSION_NUMBER } from './version';
 
 // ─── Config Types ────────────────────────────────────────────────────────────
 
@@ -106,7 +107,7 @@ const DEFAULT_CONFIG: AppConfigFile = {
   },
   app: {
     title: 'DarkLink Detector',
-    version: '1.12.0',
+    version: APP_VERSION_NUMBER,
     description: '网页暗链检测工具',
   },
   threatIntel: {

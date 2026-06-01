@@ -49,9 +49,8 @@ scan:
 app:
   # 应用标题
   title: "DarkLink Detector"
-  # 版本号 (自动从 package.json 同步，请勿手动修改)
-  version: "1.12.0"
-  # 描述
+  # 版本号 — 自动从 package.json 读取，无需手动配置
+  # 如需修改版本号，只需修改 package.json 中的 version 字段
   description: "网页暗链检测工具"
 
 # 威胁情报API配置
