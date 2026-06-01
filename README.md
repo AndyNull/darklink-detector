@@ -2,7 +2,7 @@
 
 > 专业的网页暗链检测与威胁情报分析平台
 
-**版本：v1.10.0**
+**版本：v1.13.0**
 
 ---
 
@@ -392,14 +392,14 @@ docker compose restart
 
 完整版本更新记录请查看 [CHANGELOG.md](./CHANGELOG.md)
 
-### 最近更新 (v1.10.0)
+### 最近更新 (v1.13.0)
 
-- **安全加固** — 修复 SSRF 绕过（curl 回退路径 DNS 检查）、SQL 注入、API 认证缺失等关键安全问题
-- **页面源码预览修复** — 修复扫描结果 HTML 源码预览始终显示"无HTML内容"的问题，改为按需加载
-- **架构优化** — 提取共享常量模块消除代码重复，浏览器渲染并发改用信号量修复竞态条件
-- **数据库索引** — SQLite schema 补全所有缺失索引，MySQL/PostgreSQL schema 补全7个缺失模型
-- **引擎同步** — Mini 扫描引擎同步 IPv6 SSRF 防护和完整检测数据库（关键词/缩短服务/可信域名）
-- **生产优化** — 移除 `ignoreBuildErrors`、Docker 优雅关闭修复、请求体大小限制、错误信息脱敏
+- **安全修复** — SSRF 重定向绕过、HTML 大小限制(2MB)、WebSocket 输入校验、CORS 可配置化、错误信息脱敏
+- **并发修复** — SQLite WAL 模式+busy_timeout、扫描竞态守卫、parallelWithLimit 并发 bug、自动启动重试限制
+- **可靠性增强** — Socket 断线重连、WebSocket 心跳、DNS 查询超时(5s)、扫描时长保护(10min)、启动健康恢复
+- **检测精度** — CSS 隐藏检测扩展(7种新手法)、iframe 检测扩展(5种)、混淆 JS 检测扩展(8种模式)、上下文关键词检测
+- **性能优化** — 图片URL去重O(n²)→O(n)、DNS 缓存 LRU、暗链过滤记忆化、导入路由批量 createMany
+- **版本单一来源** — 版本号统一从 `package.json` 读取，不再多处硬编码
 
 ---
 

@@ -4,6 +4,112 @@ All notable changes to DarkLink Detector will be documented in this file.
 
 ---
 
+## [v1.13.0] - 2026-06-01
+
+### Security
+
+- **SSRF 重定向绕过修复** — HTTP 重定向到私有 IP 可绕过 DNS Rebinding 检查，现在对重定向目标的 IP 地址直接校验（S1）
+- **错误信息脱敏** — `/api/scan/route.ts` 不再向客户端暴露 `(err as Error).message`，统一使用 `safeErrorResponse()`（C1）
+- **HTML 大小限制** — 新增 `MAX_HTML_SIZE = 2MB`，防止超大页面耗尽内存（S2）
+- **CORS 可配置** — Mini-services 的 `ALLOWED_ORIGINS` 改为从 `CORS_ORIGINS` 环境变量读取，不再硬编码 localhost（C2）
+- **WebSocket 输入校验** — `scan:start` 事件新增 `concurrency`/`timeout` 参数范围校验，防止资源耗尽（A4）
+
+### Fixed
+
+- **SQLite 并发写入** — 添加 `busy_timeout=5000` + `connection_limit=1`，启用 WAL 模式，解决 SQLITE_BUSY 错误（D2）
+- **并发扫描竞态** — 新增 `isAnyTaskRunning()` 守卫，防止重复点击"开始扫描"触发多个并发扫描（A1）
+- **ErrorBoundary 日志** — 添加 `componentDidCatch` 和 `resetKey` 强制重挂载，修复静默吞错误和状态残留（F1）
+- **Socket 断线重连** — 服务端断开后不再被动等待，2 秒后主动重连（F2）
+- **轮询定时器泄漏** — `pollScanUntilComplete` 的 `stop()` 现在正确清除 `setTimeout`（F3）
+- **parallelWithLimit 并发 bug** — 修复 `Promise.race` 始终返回 `false` 的竞态条件，改用 `Set<Promise>` + `.finally()` 自移除（m8）
+- **导入路由性能** — 10 个顺序 `upsert` 改为批量 `createMany`（每批 500 条），大幅提升导入速度（m3）
+- **错误响应格式统一** — `sync-tasks` 路由 3 处泄露 `err.message` 的错误处理改为统一中文脱敏消息（m1）
+- **自动启动崩溃循环** — 引擎自动启动添加重试上限（3 次）和冷却时间（60s），防止崩溃风暴
+- **Playwright 缺失错误** — `chromium.launch()` 捕获异常，给出友好提示而非崩溃
+- **扫描无限挂起** — 新增 10 分钟最大扫描时长保护，超时自动终止
+- **SQLite 路径安全** — `buildDatabaseUrl()` 新增路径遍历防护和自动创建目录
+- **DNS 超时** — 新增 5 秒 DNS 查询超时，防止扫描挂起在无响应的 DNS 服务器（S3）
+- **Prisma 连接关闭** — 添加 `SIGTERM`/`SIGINT` 信号处理，优雅关闭数据库连接（D3）
+
+### Added
+
+- **健康检查版本号** — `/api/health` 返回 `version` 字段
+- **扫描 API 错误码** — 新增 6 个标准错误码：`SCAN_RATE_LIMITED`/`SCAN_MISSING_PARAMS`/`SCAN_INVALID_URLS`/`SCAN_ALREADY_RUNNING`/`SCAN_MISSING_TASK_ID`/`SCAN_UNKNOWN_ACTION`
+- **启动健康恢复** — 服务器重启后自动将残留 `running` 任务标记为 `error`
+- **WebSocket 心跳** — 客户端 25 秒 ping 间隔 + 10 秒超时，服务端 pong 响应
+- **URL 输入净化** — 新增 `sanitizeScanUrl()`：去空白、去控制字符、Unicode NFC 规范化、去追踪参数
+- **版本单一来源** — 版本号统一从 `package.json` 读取，`version.ts`/`config.ts` 不再硬编码
+
+### Changed
+
+- **Mini-service SSRF 防护** — scan-engine REST 和 WebSocket 路由新增 `validateScanUrlConfigs()` 校验
+- **Mini-service CORS 限制** — 从 `*` 改为白名单 `localhost:3000`，支持 `CORS_ORIGINS` 环境变量
+- **扫描限速消息** — 从英文改为中文 `'扫描请求过于频繁，请稍后再试'`
+- **自动启动冷却** — 从 30 秒延长到 60 秒，添加 3 次重试上限
+
+---
+
+## [v1.12.0] - 2026-06-01
+
+### Security
+
+- **XSS 修复** — HTML 预览使用 React JSX 替代 `dangerouslySetInnerHTML`
+- **CRLF 注入修复** — `fetchWithCurl` 请求头添加 CR/LF 清理
+- **速率限制器内存修复** — 最大条目数限制为 10K，优先使用 `x-real-ip`
+- **localhost 子域名 SSRF** — 阻止 `*.localhost` 子域名绕过 SSRF 防护
+- **重定向 DNS 校验** — `browser-sim.ts` 重定向目标新增 DNS 解析校验
+
+### Performance
+
+- **图片 URL 去重** — O(n²) → O(n)，改用 Set 数据结构
+- **隐藏文本检测** — `$('*').each()` → `$('[style]').each()`，减少无样式元素遍历
+- **正则编译优化** — 正则常量提升到模块级别，避免重复编译
+- **DNS 缓存 LRU** — 最大 1000 条目限制，防止内存膨胀
+- **暗链面板预计算** — `useMemo` 预计算 hostnames，减少重复计算
+- **暗链过滤记忆化** — `getFilteredDarkLinks` 添加 Zustand 记忆化选择器
+
+### Accuracy
+
+- **CSS 隐藏检测扩展** — 新增 7 种隐藏技术：`visibility:hidden`、`opacity:0`、`text-indent:-9999px`、离屏定位、`clip-path`、`transform:scale(0)`、`max-height:0+overflow:hidden`
+- **iframe 检测扩展** — 新增 5 种技术：clip、offscreen、sandbox、aria-hidden
+- **混淆 JS 检测扩展** — 新增 8 种模式：setTimeout/setInterval 字符串、new Function、document.write、hex/unicode 转义、parseInt hex、atob
+- **独立规则类型** — `link_farm` 和 `mixed_content` 从错误分类中拆分为独立规则类型
+- **nofollow 上下文门控** — 低严重度无指标时不标记
+- **上下文关键词检测** — 模糊关键词仅在伴随可疑指标时标记
+
+### Quality
+
+- **空 catch 块** — 28+ 处空 catch 块改为正确错误日志
+- **无障碍标签** — 25+ 个仅图标按钮添加 `aria-label`
+- **QR 码阈值调整** — 怀疑阈值从 300 调整到 500 字符 + 上下文检查
+- **URL 缩短服务去重** — qr-detector.ts 去除重复缩短服务条目
+- **数据库索引** — ScanResult/DarkLink/SyncTask/MaliciousDomain/IP 添加 `@@index`
+- **Mini-service 同步** — 修正 CHEAP_TLDS 偏移，补充 UI 类型标签映射，添加 10 个新检测规则到设置
+- **配置校验** — 新增 `validateConfig()` 范围检查和 `getScanConfigMs()` 毫秒转换
+- **ErrorBoundary 组件** — 扫描结果面板添加错误边界组件
+- **tsconfig 排除** — 排除 `skills/` 目录修复构建错误
+
+---
+
+## [v1.11.0] - 2026-05-31
+
+### Added
+
+- **DNS 缓存** — 新增内存 DNS 缓存（60s TTL），减少批量扫描重复解析延迟
+- **关键词精度优化** — 移除 17 个过于宽泛的独立检测关键词，新增上下文感知规则（10a-ctx），模糊关键词仅在伴随可疑指标时标记
+- **健康检查增强** — `/api/health` 新增数据库连接检查和 mini-service 健康监控（扫描引擎 3003、数据同步 3004）
+- **Docker Playwright** — Dockerfile runner 阶段添加 `bunx playwright install --with-deps chromium`
+
+### Changed
+
+- **HTML 预览权限** — `/api/scan/html` 移除 `requireSessionAuth`，查看扫描结果改为公开访问（与 `/api/scan` GET 一致）
+- **Docker 入口点** — 替换 `sleep 2` 为健康检查循环，添加服务监控/重启和启动验证
+- **Dockerfile** — 复制 `bun.lock` 确保可复现构建
+- **Mini-service 进度同步** — types.ts 补全缺失字段（currentUrlStartTime/avgTimePerUrl/estimatedTimeRemaining/darkLinksFound）
+- **扫描引擎进度** — 同步新增进度字段到 mini-service 发射
+
+---
+
 ## [v1.10.0] - 2026-05-31
 
 ### Security
