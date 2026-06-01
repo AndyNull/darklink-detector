@@ -10,6 +10,9 @@ import { safeErrorResponse } from '@/lib/api-error';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
+// Maximum scan execution time — 10 minutes. Scans exceeding this are auto-stopped.
+const MAX_SCAN_DURATION_MS = 10 * 60 * 1000;
+
 // NOTE: Scan start is publicly accessible — no login required per design
 export async function POST(request: NextRequest) {
   // Rate limit: 10 scan starts per minute per IP
@@ -90,6 +93,21 @@ export async function POST(request: NextRequest) {
 
     // Keep the promise alive in the registry
     registerScanPromise(taskId, scanPromise);
+
+    // Auto-stop scan after MAX_SCAN_DURATION_MS to prevent runaway scans
+    const scanTimeout = setTimeout(() => {
+      if (isTaskRunning(taskId)) {
+        console.warn(`[SCAN] Task ${taskId} exceeded ${MAX_SCAN_DURATION_MS / 1000}s limit — auto-stopping`);
+        stopTask(taskId);
+        addTaskLog(taskId, {
+          level: 'warn',
+          message: `扫描任务超过最大执行时间（${MAX_SCAN_DURATION_MS / 60000}分钟），已自动停止`,
+          timestamp: new Date(),
+        });
+      }
+    }, MAX_SCAN_DURATION_MS);
+    // Clear timeout when scan finishes naturally
+    scanPromise.finally(() => clearTimeout(scanTimeout));
 
     // Also try waitUntil for Next.js 14.1+
     try {

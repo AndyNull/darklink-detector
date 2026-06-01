@@ -53,35 +53,59 @@ async function getBrowser(): Promise<Browser> {
   }
   _browserLaunchPromise = (async () => {
     console.log('[BrowserRenderer] Launching Chromium headless browser...');
-    const browser = await chromium.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-extensions',
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-component-update',
-        '--disable-client-side-phishing-detection',
-        '--disable-default-apps',
-        '--disable-hang-monitor',
-        '--disable-prompt-on-repost',
-        '--disable-sync',
-        '--metrics-recording-only',
-        '--safebrowsing-disable-auto-update',
-      ],
-    });
-    console.log('[BrowserRenderer] Browser launched successfully');
-    _browser = browser;
-    _browserLaunchPromise = null;
-    return browser;
+    try {
+      const browser = await chromium.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-extensions',
+          '--disable-web-security',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--no-first-run',
+          '--no-default-browser-check',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-component-update',
+          '--disable-client-side-phishing-detection',
+          '--disable-default-apps',
+          '--disable-hang-monitor',
+          '--disable-prompt-on-repost',
+          '--disable-sync',
+          '--metrics-recording-only',
+          '--safebrowsing-disable-auto-update',
+        ],
+      });
+      console.log('[BrowserRenderer] Browser launched successfully');
+      _browser = browser;
+      _browserLaunchPromise = null;
+      return browser;
+    } catch (err: any) {
+      _browserLaunchPromise = null;
+      const msg = err?.message || String(err);
+      // Detect common Playwright/Chromium missing installation errors
+      if (
+        msg.includes('Executable doesn\'t exist') ||
+        msg.includes('playwright install') ||
+        msg.includes('Unsupported platform') ||
+        msg.includes('Browser has been disconnected') ||
+        msg.includes('Could not find browser')
+      ) {
+        console.error(
+          '[BrowserRenderer] Playwright未安装或Chromium缺失，浏览器渲染功能不可用。\n' +
+          '请运行: bunx playwright install chromium\n' +
+          '原始错误: ' + msg
+        );
+        throw new Error(
+          'Playwright未安装，请运行: bunx playwright install chromium'
+        );
+      }
+      console.error('[BrowserRenderer] Failed to launch browser:', msg);
+      throw err;
+    }
   })();
   return _browserLaunchPromise;
 }

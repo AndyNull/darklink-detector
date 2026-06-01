@@ -9,9 +9,13 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-// Auto-start cooldown — only attempt auto-start once every 30 seconds
+// Auto-start cooldown — only attempt auto-start once every 60 seconds
 let lastAutoStartAttempt = 0;
-const AUTO_START_COOLDOWN_MS = 30000;
+const AUTO_START_COOLDOWN_MS = 60000;
+
+// Track consecutive auto-start failures per service; after MAX_RETRIES, stop trying
+const autoStartRetryCount: Record<string, number> = {};
+const MAX_AUTO_START_RETRIES = 3;
 
 export async function GET(request: NextRequest) {
   // Engine status is publicly viewable (read-only, no sensitive data exposed)
@@ -28,24 +32,33 @@ export async function GET(request: NextRequest) {
 
     // Auto-start offline services (with cooldown to avoid excessive restart attempts)
     const anyOffline = scanEngineStatus[1].status === 'offline' || dataSyncStatus[1].status === 'offline';
-    if (anyOffline) {
+    const anyFailed = Object.values(autoStartRetryCount).some(c => c >= MAX_AUTO_START_RETRIES);
+    if (anyOffline && !anyFailed) {
       const now = Date.now();
       if (now - lastAutoStartAttempt > AUTO_START_COOLDOWN_MS) {
         lastAutoStartAttempt = now;
         // Fire and forget — don't block the status response
-        autoStartOfflineServices().catch(() => {});
+        autoStartOfflineServices(autoStartRetryCount, MAX_AUTO_START_RETRIES).catch(() => {});
       }
     }
 
+    // Map status — if a service hit max retries, report 'failed' instead of 'offline'
+    const mapStatus = (name: string, rawStatus: string) => {
+      if (rawStatus === 'offline' && (autoStartRetryCount[name] ?? 0) >= MAX_AUTO_START_RETRIES) {
+        return 'failed';
+      }
+      return rawStatus;
+    };
+
     return NextResponse.json({
       scanEngine: {
-        status: scanEngineStatus[1].status,
+        status: mapStatus('scan-engine', scanEngineStatus[1].status),
         port: scanEngineStatus[1].port,
         uptime: scanEngineStatus[1].uptime,
         activeTasks: scanEngineStatus[1].activeTasks,
       },
       dataSyncService: {
-        status: dataSyncStatus[1].status,
+        status: mapStatus('data-sync-service', dataSyncStatus[1].status),
         port: dataSyncStatus[1].port,
         uptime: dataSyncStatus[1].uptime,
         connectedClients: dataSyncStatus[1].connectedClients,

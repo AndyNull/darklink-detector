@@ -250,17 +250,30 @@ export async function startService(service: ServiceName): Promise<number> {
  * Called from the status API to ensure services are running.
  * Returns the list of services that were auto-started.
  */
-export async function autoStartOfflineServices(): Promise<ServiceName[]> {
+export async function autoStartOfflineServices(
+  retryCount?: Record<string, number>,
+  maxRetries?: number,
+): Promise<ServiceName[]> {
   const started: ServiceName[] = [];
   const services = getAllServiceNames();
   
   for (const service of services) {
     // Skip services that were manually stopped
     if (isAutoStartDisabled(service)) continue;
+
+    // Skip services that have exceeded max retries
+    if (retryCount && maxRetries && (retryCount[service] ?? 0) >= maxRetries) {
+      console.warn(`[ENGINE] Skipping auto-start for ${service}: exceeded ${maxRetries} retry limit`);
+      continue;
+    }
     
     // Check if service is already online
     const health = await checkServiceHealth(service, 0); // No retries for quick check
-    if (health && health.status === 'ok') continue;
+    if (health && health.status === 'ok') {
+      // Service came back online — reset retry counter
+      if (retryCount) retryCount[service] = 0;
+      continue;
+    }
     
     // Service is offline and was not manually stopped — try to start it
     try {
@@ -269,13 +282,24 @@ export async function autoStartOfflineServices(): Promise<ServiceName[]> {
       started.push(service);
       // Clear the disabled flag since the service was auto-started
       clearAutoStartDisabled(service);
+      // Reset retry counter on success
+      if (retryCount) retryCount[service] = 0;
     } catch (err) {
       // If it says "already running", that's fine
       const msg = (err as Error).message || '';
       if (msg.includes('已在运行中')) {
         clearAutoStartDisabled(service);
+        if (retryCount) retryCount[service] = 0;
       } else {
         console.error(`[ENGINE] Auto-start failed for ${service}:`, msg);
+        // Increment retry counter
+        if (retryCount) {
+          retryCount[service] = (retryCount[service] ?? 0) + 1;
+          const count = retryCount[service];
+          if (maxRetries && count >= maxRetries) {
+            console.error(`[ENGINE] Service ${service} has failed ${count} auto-start attempts — marking as failed`);
+          }
+        }
       }
     }
   }

@@ -3,8 +3,8 @@
  * Supports SQLite, MySQL, and PostgreSQL
  */
 
-import { readFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
+import { readFileSync, existsSync, mkdirSync } from 'fs';
+import { resolve, relative } from 'path';
 import { APP_VERSION_NUMBER } from './version';
 
 // ─── Config Types ────────────────────────────────────────────────────────────
@@ -335,8 +335,31 @@ export function buildDatabaseUrl(config?: DatabaseConfig): string {
 
   switch (dbConfig.type) {
     case 'sqlite': {
-      const path = resolve(process.cwd(), dbConfig.sqlite.path);
-      return `file:${path}?busy_timeout=5000&connection_limit=1`;
+      const dbPath = resolve(process.cwd(), dbConfig.sqlite.path);
+
+      // Prevent path traversal — the database file must live within the project directory
+      const rel = relative(process.cwd(), dbPath);
+      if (rel.startsWith('..') || resolve(rel) !== dbPath) {
+        throw new Error(
+          `[Config] SQLite路径不安全: "${dbConfig.sqlite.path}" 解析为 "${dbPath}"，超出项目目录。` +
+          `数据库文件必须位于项目目录内。`
+        );
+      }
+
+      // Ensure the parent directory exists (create it if needed)
+      const dir = resolve(dbPath, '..');
+      if (!existsSync(dir)) {
+        try {
+          mkdirSync(dir, { recursive: true });
+          console.log(`[Config] Created SQLite database directory: ${dir}`);
+        } catch (err) {
+          throw new Error(
+            `[Config] 无法创建SQLite数据库目录: ${dir}。错误: ${(err as Error).message}`
+          );
+        }
+      }
+
+      return `file:${dbPath}?busy_timeout=5000&connection_limit=1`;
     }
 
     case 'mysql': {
