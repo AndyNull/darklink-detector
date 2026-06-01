@@ -42,10 +42,13 @@ All notable changes to DarkLink Detector will be documented in this file.
 
 ### Changed
 
+- **开发服务器** — `bun run dev` 改为使用生产构建（`next build` + `node standalone`），因为 Turbopack 开发服务器占用 ~880MB 内存导致沙箱 OOM 崩溃；新增 `dev:turbo` 脚本保留 HMR 开发模式
+- **引擎自动启动** — 默认禁用，仅通过 `AUTO_START_SERVICES=true` 环境变量启用（Docker 入口脚本直接管理 mini-service）
 - **Mini-service SSRF 防护** — scan-engine REST 和 WebSocket 路由新增 `validateScanUrlConfigs()` 校验
 - **Mini-service CORS 限制** — 从 `*` 改为白名单 `localhost:3000`，支持 `CORS_ORIGINS` 环境变量
 - **扫描限速消息** — 从英文改为中文 `'扫描请求过于频繁，请稍后再试'`
 - **自动启动冷却** — 从 30 秒延长到 60 秒，添加 3 次重试上限
+- **Playwright/sharp/jsqr 延迟加载** — scan-engine.ts 改为动态 import，减少初始内存占用 ~550-600MB
 
 ---
 
