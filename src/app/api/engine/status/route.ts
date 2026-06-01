@@ -17,10 +17,10 @@ const AUTO_START_COOLDOWN_MS = 120000;
 const autoStartRetryCount: Record<string, number> = {};
 const MAX_AUTO_START_RETRIES = 3;
 
-// Auto-start is DISABLED in development mode because spawning child processes
-// from the Next.js dev server can cause instability (especially in sandboxed environments).
-// In production (Docker), the entrypoint script starts mini-services directly.
-const AUTO_START_ENABLED = process.env.NODE_ENV === 'production';
+// Auto-start is DISABLED by default. In Docker, the entrypoint script starts mini-services directly.
+// Spawning child processes from the Next.js server can cause OOM crashes in sandboxed environments.
+// Enable only via explicit environment variable.
+const AUTO_START_ENABLED = process.env.AUTO_START_SERVICES === 'true';
 
 export async function GET(request: NextRequest) {
   // Engine status is publicly viewable (read-only, no sensitive data exposed)

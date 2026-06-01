@@ -1,5 +1,27 @@
-import jsQR from 'jsqr';
-import sharp from 'sharp';
+// Heavy deps: lazy-loaded to avoid pulling sharp (~50MB native) and jsqr into
+// the server bundle at module-init time. They are only needed during scans.
+import type jsqrType from 'jsqr';
+import type sharpType from 'sharp';
+
+let _jsqr: typeof jsqrType | null = null;
+let _sharp: typeof sharpType | null = null;
+
+async function getJsqr() {
+  if (!_jsqr) {
+    const mod = await import('jsqr');
+    _jsqr = mod.default;
+  }
+  return _jsqr;
+}
+
+async function getSharp() {
+  if (!_sharp) {
+    const mod = await import('sharp');
+    _sharp = mod.default;
+  }
+  return _sharp;
+}
+
 import type { QrCodeData } from './types';
 import { getNextUserAgent } from './browser-sim';
 import { URL_SHORTENERS } from './shared-constants';
@@ -89,11 +111,12 @@ function dedupResults(results: QrCodeData[]): QrCodeData[] {
 
 // ─── Core: jsQR on raw RGBA ──────────────────────────────────────────────────
 
-function jsqrFromRgba(
+async function jsqrFromRgba(
   rgba: Uint8ClampedArray,
   width: number,
   height: number,
-): string | null {
+): Promise<string | null> {
+  const jsQR = await getJsqr();
   const result = jsQR(rgba, width, height, {
     inversionAttempts: 'attemptBoth',
   });
@@ -114,6 +137,7 @@ export async function detectQrCodes(
   // Generate base64 data URI from the source image for popup verification
   // Try JPEG resize first, then PNG resize, then raw base64 as fallbacks
   let qrImageBase64: string | undefined;
+  const sharp = await getSharp();
   try {
     if (imageBuffer.length < 2 * 1024 * 1024) {
       // Attempt 1: Resize to JPEG (smallest size)
@@ -166,7 +190,7 @@ export async function detectQrCodes(
       .raw()
       .toBuffer({ resolveWithObject: true });
 
-    const text = jsqrFromRgba(new Uint8ClampedArray(data), info.width, info.height);
+    const text = await jsqrFromRgba(new Uint8ClampedArray(data), info.width, info.height);
     if (text) {
       pushResult(results, text, sourceUrl, qrImageBase64);
       return results; // early exit
@@ -182,7 +206,7 @@ export async function detectQrCodes(
         .raw()
         .toBuffer({ resolveWithObject: true });
 
-      const text2 = jsqrFromRgba(
+      const text2 = await jsqrFromRgba(
         new Uint8ClampedArray(enhanced.data),
         enhanced.info.width,
         enhanced.info.height,
@@ -202,7 +226,7 @@ export async function detectQrCodes(
         .raw()
         .toBuffer({ resolveWithObject: true });
 
-      const text3 = jsqrFromRgba(
+      const text3 = await jsqrFromRgba(
         new Uint8ClampedArray(rotated.data),
         rotated.info.width,
         rotated.info.height,
@@ -234,7 +258,7 @@ export async function detectQrCodes(
               .raw()
               .toBuffer({ resolveWithObject: true });
 
-            const textQ = jsqrFromRgba(
+            const textQ = await jsqrFromRgba(
               new Uint8ClampedArray(crop.data),
               crop.info.width,
               crop.info.height,
@@ -258,7 +282,7 @@ export async function detectQrCodes(
         .raw()
         .toBuffer({ resolveWithObject: true });
 
-      const textR = jsqrFromRgba(
+      const textR = await jsqrFromRgba(
         new Uint8ClampedArray(rotated.data),
         rotated.info.width,
         rotated.info.height,
@@ -272,13 +296,14 @@ export async function detectQrCodes(
     // ── Fallback: try passing raw data directly to jsQR if sharp fails ────
     try {
       // Attempt to get basic image info and try jsQR anyway
-      const meta = await sharp(imageBuffer).metadata();
+      const sharpFallback = await getSharp();
+      const meta = await sharpFallback(imageBuffer).metadata();
       if (meta.width && meta.height && meta.channels) {
-        const raw = await sharp(imageBuffer)
+        const raw = await sharpFallback(imageBuffer)
           .ensureAlpha()
           .raw()
           .toBuffer();
-        const text = jsqrFromRgba(new Uint8ClampedArray(raw), meta.width, meta.height);
+        const text = await jsqrFromRgba(new Uint8ClampedArray(raw), meta.width, meta.height);
         if (text) {
           pushResult(results, text, sourceUrl, qrImageBase64);
         }

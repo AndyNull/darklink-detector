@@ -1,7 +1,36 @@
 import { parseHtml, extractImageUrls, extractExternalResources, extractUrlsFromJs, extractUrlsFromCssContent as extractUrlsFromCss, resolveUrl } from './html-parser';
-import { detectQrCodes, detectQrCodesFromUrls, detectQrCodesFromDataUri } from './qr-detector';
+// Lazy-load qr-detector to avoid loading sharp + jsqr at module init time
+// (these are heavy native/image-processing deps only needed during scans)
+import type { detectQrCodesFromDataUri as DetectQrCodesFromDataUriFn, detectQrCodesFromUrls as DetectQrCodesFromUrlsFn } from './qr-detector';
+
+let _detectQrCodesFromDataUri: typeof DetectQrCodesFromDataUriFn | null = null;
+let _detectQrCodesFromUrls: typeof DetectQrCodesFromUrlsFn | null = null;
+
+async function getQrDetector() {
+  if (!_detectQrCodesFromDataUri) {
+    const mod = await import('./qr-detector');
+    _detectQrCodesFromDataUri = mod.detectQrCodesFromDataUri;
+    _detectQrCodesFromUrls = mod.detectQrCodesFromUrls;
+  }
+  return { detectQrCodesFromDataUri: _detectQrCodesFromDataUri!, detectQrCodesFromUrls: _detectQrCodesFromUrls! };
+}
+
 import { getBrowserHeaders, getNextFingerprint, getResourceHeaders, fetchWithRedirectControl, type BrowserFingerprint } from './browser-sim';
-import { renderPageForImages, closeBrowser as closeBrowserRenderer } from './browser-renderer';
+// Lazy-load browser-renderer to avoid loading Playwright at module init time
+// (Playwright + Chromium are the single largest memory consumer, ~500MB RSS)
+import type { renderPageForImages as RenderPageForImagesFn, closeBrowser as CloseBrowserFn } from './browser-renderer';
+
+let _renderPageForImages: typeof RenderPageForImagesFn | null = null;
+let _closeBrowserRenderer: typeof CloseBrowserFn | null = null;
+
+async function getBrowserRenderer() {
+  if (!_renderPageForImages) {
+    const mod = await import('./browser-renderer');
+    _renderPageForImages = mod.renderPageForImages;
+    _closeBrowserRenderer = mod.closeBrowser;
+  }
+  return { renderPageForImages: _renderPageForImages!, closeBrowser: _closeBrowserRenderer! };
+}
 import { validateResolvedIP } from '../security';
 import { TRUSTED_DOMAINS, extractDomain, isValidDomain, isSuspiciousDomain } from './shared-constants';
 import type { ScanRequest, ScanResultData, UrlConfig, ScanProgress, LogEntry, TaskStatus, UrlDetailData, DarkLinkData, QrCodeData } from './types';
@@ -335,6 +364,7 @@ async function detectQrFromDataUris(dataUris: string[]): Promise<QrCodeData[]> {
   for (const uri of dataUris) {
     try {
       // Use the proper data URI detector which handles base64 fallback for qrImageBase64
+      const { detectQrCodesFromDataUri } = await getQrDetector();
       const res = await detectQrCodesFromDataUri(uri, uri.slice(0, 80) + '...');
       results.push(...res);
     } catch (e) {
@@ -817,6 +847,7 @@ async function analyzeHtmlResult(params: {
   if (needsBrowserRender) {
     emitLog('info', `静态分析未发现图片，启动浏览器渲染: ${sourceUrl}`);
     try {
+      const { renderPageForImages } = await getBrowserRenderer();
       const browserResult = await renderPageForImages(
         sourceUrl,
         Math.min(timeout, 20000),
@@ -882,6 +913,7 @@ async function analyzeHtmlResult(params: {
 
     if (httpImageUrls.length > 0) {
       try {
+        const { detectQrCodesFromUrls } = await getQrDetector();
         const qrResults = await detectQrCodesFromUrls(httpImageUrls, adaptive.externalTimeout, baseUrl);
         result.qrCodeDetails.push(...qrResults);
         if (qrResults.length > 0) {
@@ -1656,6 +1688,7 @@ export async function executeScan(
     activeTasks.delete(taskId);
     // Close the browser renderer to free resources
     // Note: browser is a singleton, so we close it after each scan task
-    closeBrowserRenderer().catch(() => {});
+    // Lazy-loaded: only import browser-renderer when we actually need to close the browser
+    getBrowserRenderer().then(({ closeBrowser }) => closeBrowser()).catch(() => {});
   }
 }

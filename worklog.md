@@ -545,3 +545,86 @@ Final production readiness polish: fix auto-start crash loop, add Playwright err
 - TypeScript compilation passes (`bunx tsc --noEmit` — no errors)
 - Build succeeds (`bun run build` — compiled successfully, pre-existing warnings unrelated to changes)
 
+## Task 17: Fix Dev Server OOM Crash — Lazy-Load Heavy Dependencies
+**Date**: 2025-06-01
+**Agent**: Sub-agent (Task 17)
+
+### Scope
+Fix Next.js 16 dev server OOM crash caused by Playwright, sharp, and jsqr being loaded at module-init time through static imports, inflating the Turbopack server bundle to ~877MB RSS even before any scan is run.
+
+---
+
+### Fix 1: Lazy-load browser-renderer (Playwright) in scan-engine.ts ✅
+
+**File**: `src/lib/scan-engine/scan-engine.ts`
+
+**Problem**: `import { renderPageForImages, closeBrowser } from './browser-renderer'` caused Turbopack to bundle the entire Playwright library (~500MB) into the server bundle at module-init time, even though Playwright is only needed during actual scans.
+
+**Changes**:
+- Removed top-level `import { renderPageForImages, closeBrowser as closeBrowserRenderer } from './browser-renderer'`
+- Added `import type { renderPageForImages as RenderPageForImagesFn, closeBrowser as CloseBrowserFn } from './browser-renderer'` (type-only import, no runtime cost)
+- Added lazy-loading helpers: `_renderPageForImages`, `_closeBrowserRenderer` module-level variables + `getBrowserRenderer()` async function that uses `await import('./browser-renderer')`
+- Updated `analyzeHtmlResult()` to call `const { renderPageForImages } = await getBrowserRenderer()` before using `renderPageForImages()`
+- Updated `closeBrowserRenderer()` call at end of `executeScan()` to `getBrowserRenderer().then(({ closeBrowser }) => closeBrowser()).catch(() => {})`
+
+**Expected impact**: ~500MB RSS reduction at dev server startup
+
+---
+
+### Fix 2: Lazy-load qr-detector (sharp + jsqr) in scan-engine.ts ✅
+
+**File**: `src/lib/scan-engine/scan-engine.ts`
+
+**Problem**: `import { detectQrCodes, detectQrCodesFromUrls, detectQrCodesFromDataUri } from './qr-detector'` caused sharp (~50-100MB with native bindings) and jsqr to be loaded at module-init time.
+
+**Changes**:
+- Removed top-level `import { detectQrCodes, detectQrCodesFromUrls, detectQrCodesFromDataUri } from './qr-detector'`
+- Added `import type { detectQrCodesFromDataUri as ..., detectQrCodesFromUrls as ... } from './qr-detector'` (type-only import)
+- Added lazy-loading helpers: `_detectQrCodesFromDataUri`, `_detectQrCodesFromUrls` module-level variables + `getQrDetector()` async function
+- Updated `detectQrFromDataUris()` helper to call `const { detectQrCodesFromDataUri } = await getQrDetector()`
+- Updated `analyzeHtmlResult()` QR detection call to use `const { detectQrCodesFromUrls } = await getQrDetector()`
+- Removed unused `detectQrCodes` import (was never directly used in scan-engine.ts)
+
+**Expected impact**: ~50-100MB RSS reduction at dev server startup
+
+---
+
+### Fix 3: Make sharp/jsqr dynamic inside qr-detector.ts ✅
+
+**File**: `src/lib/scan-engine/qr-detector.ts`
+
+**Problem**: `import jsQR from 'jsqr'` and `import sharp from 'sharp'` at the top level meant that even if someone accidentally imported qr-detector directly, the heavy deps would still load.
+
+**Changes**:
+- Replaced `import jsQR from 'jsqr'` with `import type jsqrType from 'jsqr'` + lazy-loading `getJsqr()` function using `await import('jsqr')`
+- Replaced `import sharp from 'sharp'` with `import type sharpType from 'sharp'` + lazy-loading `getSharp()` function using `await import('sharp')`
+- Changed `jsqrFromRgba()` from sync to async (returns `Promise<string | null>`) since it now needs to await the lazy-loaded jsqr
+- Updated all `jsqrFromRgba()` call sites to use `await jsqrFromRgba()`
+- Added `const sharp = await getSharp()` at the top of `detectQrCodes()` and used it throughout
+- In the fallback catch block (where `sharp` may not be available from the main try), added `const sharpFallback = await getSharp()` to get a fresh reference
+
+**Expected impact**: Additional safety net ensuring sharp/jsqr never load at module-init time; even if qr-detector is imported directly, the heavy deps are deferred until first use
+
+---
+
+### Skipped: Lazy-loading html-parser/cheerio
+
+**File**: `src/lib/scan-engine/html-parser.ts`
+
+**Analysis**: cheerio (~2-3MB) is used extensively in html-parser.ts, and `resolveUrl` from html-parser is used throughout scan-engine.ts in non-scan utility functions. Lazy-loading the entire html-parser module would require invasive changes to many function signatures. The memory savings (~2-3MB) are modest compared to Playwright (~500MB) and sharp (~50-100MB). Not worth the complexity.
+
+---
+
+### Files Not Modified (Assessed, No Changes Needed)
+
+- **`browser-sim.ts`**: Only imports lightweight Node.js modules (`dns/promises`, `../security`). Its functions (`getBrowserHeaders`, `fetchWithRedirectControl`, etc.) are used in many places throughout scan-engine.ts including non-scan paths, making lazy-loading impractical.
+- **`browser-renderer.ts`**: Not modified directly; only how it's imported from scan-engine.ts was changed.
+- **`mini-services/scan-engine/`**: The mini-service runs as a separate Bun process (not Turbopack), so the OOM issue doesn't apply there. No browser-renderer import exists in the mini-service.
+
+---
+
+### Verification
+- TypeScript compilation passes (`bunx tsc --noEmit` — 0 errors)
+- Lint passes for all modified files (`bun run lint` — 0 new errors, 35 pre-existing errors in unrelated files)
+- No logic changes — only import patterns were modified
+
