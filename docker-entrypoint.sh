@@ -15,13 +15,10 @@ echo ""
 # ─── 1. 初始化/同步数据库 ───────────────────────────────────────────────────
 # Always run prisma db push — it's idempotent and ensures the schema is up-to-date.
 # This handles both first-run (creates DB) and upgrades (applies schema changes).
-# CRITICAL: Must use locally installed prisma (6.x), NOT bunx which downloads 7.x
-# Prisma 7+ requires prisma.config.ts and breaks our schema.prisma format.
+# Uses globally installed prisma@6 CLI (bun add -g prisma@6 in Dockerfile)
+# CRITICAL: Must NOT use bunx/npx which downloads Prisma 7.x (incompatible)
 echo "[1/5] 同步数据库 schema..."
-cd /app
-# Directly invoke the installed prisma binary via bun (not bunx/npx)
-# Prisma 6.x CLI entry: build/index.js (not bin/prisma)
-bun ./node_modules/prisma/build/index.js db push 2>&1
+cd /app && prisma db push 2>&1
 echo "  ✓ 数据库 schema 同步完成"
 
 # ─── 2. 确保默认管理员账户 ───────────────────────────────────────────────────
