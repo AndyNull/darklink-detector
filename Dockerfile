@@ -104,9 +104,7 @@ COPY --from=builder --chown=appuser:appgroup /app/prisma ./prisma
 COPY --from=builder --chown=appuser:appgroup /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=appuser:appgroup /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder --chown=appuser:appgroup /app/node_modules/prisma ./node_modules/prisma
-RUN mkdir -p /app/node_modules/.bin && \
-    ln -sf ../prisma/bin/prisma /app/node_modules/.bin/prisma && \
-    chown -R appuser:appgroup /app/node_modules/.bin
+# entrypoint 直接用 bun ./node_modules/prisma/bin/prisma 调用，无需 symlink
 
 # ── 复制 mini-services ──
 COPY --from=mini-deps --chown=appuser:appgroup /app/mini-services ./mini-services
