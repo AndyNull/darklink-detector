@@ -18,7 +18,9 @@ echo ""
 # Uses globally installed prisma@6 CLI (bun add -g prisma@6 in Dockerfile)
 # CRITICAL: Must NOT use bunx/npx which downloads Prisma 7.x (incompatible)
 echo "[1/5] 同步数据库 schema..."
-cd /app && prisma db push 2>&1
+# --skip-generate: Prisma Client 已在构建阶段生成并包含在 standalone 产物中
+# 无需运行时重新生成, 且 /opt/prisma 对 appuser 不可写
+cd /app && prisma db push --skip-generate 2>&1
 echo "  ✓ 数据库 schema 同步完成"
 
 # ─── 2. 确保默认管理员账户 ───────────────────────────────────────────────────
