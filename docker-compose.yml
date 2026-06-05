@@ -4,6 +4,10 @@
 #
 #  只需暴露 3000 端口，扫描引擎(3003)和数据同步服务(3004)
 #  通过 Next.js rewrites 反向代理，无需对外暴露。
+#
+#  构建优化:
+#  - 启用 BuildKit 缓存挂载 (Dockerfile 中已配置)
+#  - 使用 Turbopack 加速 Next.js 构建
 # ==============================================================================
 
 services:
@@ -11,6 +15,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # 启用 BuildKit 缓存挂载支持
+      args:
+        BUILDKIT_INLINE_CACHE: "1"
     container_name: darklink-detector
     restart: unless-stopped
     ports:

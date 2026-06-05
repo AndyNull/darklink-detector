@@ -27,16 +27,32 @@ agent-ctx
 .claude
 .claude*
 
-# Docker 文件自身（不需要在镜像内）
+# Docker 文件自身
 Dockerfile
 docker-compose.yml
 
-# 其他
-examples
-scripts
-skills
-src/app_backup
-download
+# 发布包（14MB，构建不需要）
 *.tar.gz
+
+# 开发备份和脚本
+src/app_backup
+scripts
+examples
+skills
+download
+snapshots
+
+# IDE 和临时文件
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Shell 脚本（仅开发用）
+*.sh
+!docker-entrypoint.sh
+
+# 环境文件（Docker 构建不使用本地 .env）
 .env*
 !.env.example
