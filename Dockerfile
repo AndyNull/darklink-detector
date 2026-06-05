@@ -100,7 +100,7 @@ COPY --from=playwright-base --chown=appuser:appgroup /app/.cache/ms-playwright /
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV DATABASE_URL=file:./db/custom.db
+ENV DATABASE_URL=file:/app/db/custom.db
 
 RUN mkdir -p /app/db /app/config && \
     chown -R appuser:appgroup /app/db /app/config
@@ -111,7 +111,7 @@ COPY --from=builder --chown=appuser:appgroup /app/.next/standalone ./
 COPY --from=builder --chown=appuser:appgroup /app/.next/static ./.next/static
 COPY --from=builder --chown=appuser:appgroup /app/public ./public
 
-RUN echo 'DATABASE_URL=file:./db/custom.db' > .env && \
+RUN echo 'DATABASE_URL=file:/app/db/custom.db' > .env && \
     chown appuser:appgroup .env
 
 # ── 复制 Prisma schema (全局 prisma CLI 需要) ──

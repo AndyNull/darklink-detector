@@ -28,7 +28,7 @@ services:
       - darklink-config:/app/config
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=file:./db/custom.db
+      - DATABASE_URL=file:/app/db/custom.db
       - PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
