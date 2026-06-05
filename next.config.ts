@@ -23,6 +23,10 @@ const nextConfig: NextConfig = {
     'localhost',
   ],
   // 服务端专用包，不打包进客户端bundle
+  // playwright/playwright-core: 扫描引擎专用，前端不需要
+  // sharp: 图片处理，后端API使用
+  // cheerio: HTML解析，后端扫描使用
+  // jsqr: QR码检测，后端扫描使用
   serverExternalPackages: ['sharp', 'cheerio', 'jsqr', 'playwright', 'playwright-core'],
   // 将 package.json 版本号注入到客户端构建中
   // 这样 version.ts 可以在客户端和服务端使用同一个版本号
