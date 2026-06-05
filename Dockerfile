@@ -8,6 +8,7 @@
 #  2. Turbopack 生产构建 — 比 webpack 快 3-5 倍
 #  3. 并行阶段 — Playwright 安装与主项目构建并行
 #  4. 精简 .dockerignore — 减少构建上下文体积
+#  5. Prisma 版本锁定 — 避免 bunx 动态安装不兼容版本
 # ==============================================================================
 
 # ─── 阶段1: 安装主项目依赖 ──────────────────────────────────────────────────
@@ -50,9 +51,9 @@ FROM deps AS builder
 
 WORKDIR /app
 
-# 生成 Prisma Client (依赖少，缓存层稳定)
+# 生成 Prisma Client (使用项目安装的 prisma 版本，而非 bunx 动态下载)
 COPY prisma ./prisma
-RUN bunx prisma generate
+RUN ./node_modules/.bin/prisma generate
 
 # 复制源代码
 COPY . .
@@ -106,10 +107,16 @@ RUN echo 'DATABASE_URL=file:./db/custom.db' > .env && \
     chown appuser:appgroup .env
 
 # ── 复制 Prisma（运行时 db:push 需要）──
+# 关键: 使用 builder 阶段安装的 prisma 版本，而非 bunx 动态下载
+# 这确保了 prisma CLI 版本与 @prisma/client 版本一致
 COPY --from=builder --chown=appuser:appgroup /app/prisma ./prisma
 COPY --from=builder --chown=appuser:appgroup /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=appuser:appgroup /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder --chown=appuser:appgroup /app/node_modules/prisma ./node_modules/prisma
+# 创建 prisma CLI 软链接，让 entrypoint 可以直接调用
+RUN mkdir -p /app/node_modules/.bin && \
+    ln -sf ../prisma/bin/prisma /app/node_modules/.bin/prisma && \
+    chown -R appuser:appgroup /app/node_modules/.bin
 
 # ── 复制 mini-services（完整源码 + node_modules，从 mini-deps 阶段）──
 # ⚠️ 必须在 standalone COPY 之后执行，覆盖 standalone 中不含依赖的 mini-services
