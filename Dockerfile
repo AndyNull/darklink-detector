@@ -1,15 +1,16 @@
 # syntax=docker/dockerfile:1.4
 # ==============================================================================
-#  暗链检测系统 — Dockerfile (多阶段构建, v3 优化版)
+#  暗链检测系统 — Dockerfile (多阶段构建, v4 优化版)
 #  单容器方案: Next.js 主应用 + 扫描引擎 + 数据同步服务
 #
 #  优化策略:
-#  1. 消除 1.2GB 跨阶段 COPY — builder 内直接 npm install + 缓存挂载
-#  2. Prisma CLI 全局安装 — 避免手动复制依赖树（effect等传递依赖）
-#  3. PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD — builder 中跳过浏览器下载
-#  4. 并行阶段 — Playwright / mini-deps 与主项目构建并行
-#  5. BuildKit 缓存挂载 — npm cache + next build 增量构建
-#  6. standalone 自带 @prisma/client — 无需手动复制
+#  1. Builder 使用 bun install 替代 npm install (406s → ~30-60s)
+#  2. 从 oven/bun:1.2 镜像直接 COPY bun 二进制 (免安装)
+#  3. Prisma CLI 安装到 /opt/prisma (全局可访问, 不依赖 /root/.bun)
+#  4. PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD — builder 中跳过浏览器下载
+#  5. 并行阶段 — Playwright / mini-deps 与主项目构建并行
+#  6. BuildKit 缓存挂载 — bun cache + next build 增量构建
+#  7. standalone 自带 @prisma/client — 无需手动复制
 # ==============================================================================
 
 # ─── 阶段1: 安装 mini-services 依赖 ─────────────────────────────────────────
@@ -39,14 +40,17 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
+# 从官方 bun 镜像复制二进制 (比 npm install -g bun 快得多)
+COPY --from=oven/bun:1.2 /usr/local/bin/bun /usr/local/bin/bun
+
 # 跳过 Playwright 浏览器下载 — 浏览器由 playwright-base 阶段单独安装
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
-COPY package.json ./
+COPY package.json bun.lock ./
 
-# 直接在 builder 内安装依赖，使用 BuildKit 缓存挂载加速后续构建
-RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm install
+# 使用 bun install 替代 npm install (显著加速依赖安装)
+RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
+    bun install
 
 # 生成 Prisma Client
 COPY prisma ./prisma
@@ -76,10 +80,19 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends curl sqlite3 && \
     rm -rf /var/lib/apt/lists/*
 
-# 全局安装 Prisma CLI (用于 entrypoint 中的 db:push)
-# 这样不需要手动复制 prisma 的完整依赖树 (effect, @prisma/config 等)
-# 版本与 package.json 中的 ^6.11.1 对齐
-RUN bun add -g prisma@6
+# ── 安装 Prisma CLI 到 /opt/prisma ──
+# 将 prisma 安装到独立目录 (而非 bun global), 避免权限问题
+# 所有用户均可通过 /usr/local/bin/prisma 调用
+RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
+    mkdir -p /opt/prisma && cd /opt/prisma && \
+    echo '{"name":"prisma-cli","dependencies":{}}' > package.json && \
+    bun add prisma@6 && \
+    chmod -R o+rX /opt/prisma/node_modules
+
+# 创建 prisma wrapper 脚本 (放在 /usr/local/bin, 所有用户 PATH 可达)
+RUN echo '#!/bin/sh' > /usr/local/bin/prisma && \
+    echo 'exec bun /opt/prisma/node_modules/prisma/build/index.js "$@"' >> /usr/local/bin/prisma && \
+    chmod +x /usr/local/bin/prisma
 
 # 从 Playwright 预构建阶段复制 Chromium
 ENV PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright
@@ -94,7 +107,6 @@ RUN mkdir -p /app/db /app/config && \
 
 # ── 复制 Next.js standalone 产物 ──
 # standalone 已包含精简的 node_modules (含 @prisma/client + .prisma/client)
-# 不需要手动复制 Prisma 相关目录
 COPY --from=builder --chown=appuser:appgroup /app/.next/standalone ./
 COPY --from=builder --chown=appuser:appgroup /app/.next/static ./.next/static
 COPY --from=builder --chown=appuser:appgroup /app/public ./public
